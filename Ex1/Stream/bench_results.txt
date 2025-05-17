@@ -1,0 +1,389 @@
+Testing: stream-base
+NX=8192:
+  #cells / #it:  8192 / 10
+  elapsed time:  0.064085 ms
+  per iteration: 0.0064085 ms
+  MLUP/s:        1278.3
+  bandwidth:     20.4528 GB/s
+  Passed result check
+NX=16384:
+  #cells / #it:  16384 / 10
+  elapsed time:  0.146833 ms
+  per iteration: 0.0146833 ms
+  MLUP/s:        1115.83
+  bandwidth:     17.8532 GB/s
+  Passed result check
+NX=32768:
+  #cells / #it:  32768 / 10
+  elapsed time:  0.241148 ms
+  per iteration: 0.0241148 ms
+  MLUP/s:        1358.83
+  bandwidth:     21.7413 GB/s
+  Passed result check
+NX=65536:
+  #cells / #it:  65536 / 10
+  elapsed time:  0.537982 ms
+  per iteration: 0.0537982 ms
+  MLUP/s:        1218.18
+  bandwidth:     19.4909 GB/s
+  Passed result check
+NX=131072:
+  #cells / #it:  131072 / 10
+  elapsed time:  1.81708 ms
+  per iteration: 0.181708 ms
+  MLUP/s:        721.333
+  bandwidth:     11.5413 GB/s
+  Passed result check
+NX=262144:
+  #cells / #it:  262144 / 10
+  elapsed time:  3.845 ms
+  per iteration: 0.3845 ms
+  MLUP/s:        681.778
+  bandwidth:     10.9085 GB/s
+  Passed result check
+NX=524288:
+  #cells / #it:  524288 / 10
+  elapsed time:  7.03754 ms
+  per iteration: 0.703754 ms
+  MLUP/s:        744.987
+  bandwidth:     11.9198 GB/s
+  Passed result check
+NX=1048576:
+  #cells / #it:  1048576 / 10
+  elapsed time:  6.23476 ms
+  per iteration: 0.623476 ms
+  MLUP/s:        1681.82
+  bandwidth:     26.9092 GB/s
+  Passed result check
+NX=2097152:
+  #cells / #it:  2097152 / 10
+  elapsed time:  8.78659 ms
+  per iteration: 0.878659 ms
+  MLUP/s:        2386.76
+  bandwidth:     38.1882 GB/s
+  Passed result check
+NX=4194304:
+  #cells / #it:  4194304 / 10
+  elapsed time:  22.7537 ms
+  per iteration: 2.27537 ms
+  MLUP/s:        1843.35
+  bandwidth:     29.4936 GB/s
+  Passed result check
+NX=8388608:
+  #cells / #it:  8388608 / 10
+  elapsed time:  49.9052 ms
+  per iteration: 4.99052 ms
+  MLUP/s:        1680.91
+  bandwidth:     26.8946 GB/s
+  Passed result check
+NX=16777216:
+  #cells / #it:  16777216 / 10
+  elapsed time:  103.498 ms
+  per iteration: 10.3498 ms
+  MLUP/s:        1621.01
+  bandwidth:     25.9362 GB/s
+  Passed result check
+NX=33554432:
+  #cells / #it:  33554432 / 10
+  elapsed time:  208.931 ms
+  per iteration: 20.8931 ms
+  MLUP/s:        1606.01
+  bandwidth:     25.6961 GB/s
+  Passed result check
+NX=67108864:
+  #cells / #it:  67108864 / 10
+  elapsed time:  418.614 ms
+  per iteration: 41.8614 ms
+  MLUP/s:        1603.12
+  bandwidth:     25.6499 GB/s
+  Passed result check
+NX=134217728:
+  #cells / #it:  134217728 / 10
+  elapsed time:  836.885 ms
+  per iteration: 83.6885 ms
+  MLUP/s:        1603.78
+  bandwidth:     25.6604 GB/s
+  Passed result check
+NX=268435456:
+  #cells / #it:  268435456 / 10
+  elapsed time:  1683.96 ms
+  per iteration: 168.396 ms
+  MLUP/s:        1594.07
+  bandwidth:     25.5051 GB/s
+  Passed result check
+NX=536870912:
+  #cells / #it:  536870912 / 10
+  elapsed time:  3365.75 ms
+  per iteration: 336.575 ms
+  MLUP/s:        1595.1
+  bandwidth:     25.5216 GB/s
+  Passed result check
+NX=1073741824:
+  #cells / #it:  1073741824 / 10
+  elapsed time:  6733.25 ms
+  per iteration: 673.325 ms
+  MLUP/s:        1594.68
+  bandwidth:     25.515 GB/s
+  Passed result check
+
+Testing: stream-omp-host
+NX=8192:
+  #cells / #it:  8192 / 10
+  elapsed time:  0.015916 ms
+  per iteration: 0.0015916 ms
+  MLUP/s:        5147.02
+  bandwidth:     82.3523 GB/s
+  Passed result check
+NX=16384:
+  #cells / #it:  16384 / 10
+  elapsed time:  0.014745 ms
+  per iteration: 0.0014745 ms
+  MLUP/s:        11111.6
+  bandwidth:     177.785 GB/s
+  Passed result check
+NX=32768:
+  #cells / #it:  32768 / 10
+  elapsed time:  0.027236 ms
+  per iteration: 0.0027236 ms
+  MLUP/s:        12031.1
+  bandwidth:     192.498 GB/s
+  Passed result check
+NX=65536:
+  #cells / #it:  65536 / 10
+  elapsed time:  0.037155 ms
+  per iteration: 0.0037155 ms
+  MLUP/s:        17638.5
+  bandwidth:     282.217 GB/s
+  Passed result check
+NX=131072:
+  #cells / #it:  131072 / 10
+  elapsed time:  0.06828 ms
+  per iteration: 0.006828 ms
+  MLUP/s:        19196.3
+  bandwidth:     307.14 GB/s
+  Passed result check
+NX=262144:
+  #cells / #it:  262144 / 10
+  elapsed time:  0.126845 ms
+  per iteration: 0.0126845 ms
+  MLUP/s:        20666.5
+  bandwidth:     330.664 GB/s
+  Passed result check
+NX=524288:
+  #cells / #it:  524288 / 10
+  elapsed time:  0.267534 ms
+  per iteration: 0.0267534 ms
+  MLUP/s:        19597.1
+  bandwidth:     313.553 GB/s
+  Passed result check
+NX=1048576:
+  #cells / #it:  1048576 / 10
+  elapsed time:  2.69722 ms
+  per iteration: 0.269722 ms
+  MLUP/s:        3887.61
+  bandwidth:     62.2018 GB/s
+  Passed result check
+NX=2097152:
+  #cells / #it:  2097152 / 10
+  elapsed time:  7.0716 ms
+  per iteration: 0.70716 ms
+  MLUP/s:        2965.6
+  bandwidth:     47.4495 GB/s
+  Passed result check
+NX=4194304:
+  #cells / #it:  4194304 / 10
+  elapsed time:  8.76673 ms
+  per iteration: 0.876673 ms
+  MLUP/s:        4784.34
+  bandwidth:     76.5495 GB/s
+  Passed result check
+NX=8388608:
+  #cells / #it:  8388608 / 10
+  elapsed time:  24.3362 ms
+  per iteration: 2.43362 ms
+  MLUP/s:        3446.97
+  bandwidth:     55.1515 GB/s
+  Passed result check
+NX=16777216:
+  #cells / #it:  16777216 / 10
+  elapsed time:  53.8587 ms
+  per iteration: 5.38587 ms
+  MLUP/s:        3115.04
+  bandwidth:     49.8407 GB/s
+  Passed result check
+NX=33554432:
+  #cells / #it:  33554432 / 10
+  elapsed time:  107.2 ms
+  per iteration: 10.72 ms
+  MLUP/s:        3130.09
+  bandwidth:     50.0814 GB/s
+  Passed result check
+NX=67108864:
+  #cells / #it:  67108864 / 10
+  elapsed time:  216.513 ms
+  per iteration: 21.6513 ms
+  MLUP/s:        3099.53
+  bandwidth:     49.5924 GB/s
+  Passed result check
+NX=134217728:
+  #cells / #it:  134217728 / 10
+  elapsed time:  429.708 ms
+  per iteration: 42.9708 ms
+  MLUP/s:        3123.46
+  bandwidth:     49.9754 GB/s
+  Passed result check
+NX=268435456:
+  #cells / #it:  268435456 / 10
+  elapsed time:  945.929 ms
+  per iteration: 94.5929 ms
+  MLUP/s:        2837.8
+  bandwidth:     45.4047 GB/s
+  Passed result check
+NX=536870912:
+  #cells / #it:  536870912 / 10
+  elapsed time:  1922.15 ms
+  per iteration: 192.215 ms
+  MLUP/s:        2793.08
+  bandwidth:     44.6893 GB/s
+  Passed result check
+NX=1073741824:
+  #cells / #it:  1073741824 / 10
+  elapsed time:  3895.2 ms
+  per iteration: 389.52 ms
+  MLUP/s:        2756.58
+  bandwidth:     44.1053 GB/s
+  Passed result check
+
+Testing: stream-cuda
+NX=8192:
+  #cells / #it:  8192 / 10
+  elapsed time:  0.050643 ms
+  per iteration: 0.0050643 ms
+  MLUP/s:        1617.6
+  bandwidth:     25.8816 GB/s
+  Passed result check
+NX=16384:
+  #cells / #it:  16384 / 10
+  elapsed time:  0.047372 ms
+  per iteration: 0.0047372 ms
+  MLUP/s:        3458.58
+  bandwidth:     55.3373 GB/s
+  Passed result check
+NX=32768:
+  #cells / #it:  32768 / 10
+  elapsed time:  0.0496 ms
+  per iteration: 0.00496 ms
+  MLUP/s:        6606.45
+  bandwidth:     105.703 GB/s
+  Passed result check
+NX=65536:
+  #cells / #it:  65536 / 10
+  elapsed time:  0.052765 ms
+  per iteration: 0.0052765 ms
+  MLUP/s:        12420.4
+  bandwidth:     198.726 GB/s
+  Passed result check
+NX=131072:
+  #cells / #it:  131072 / 10
+  elapsed time:  0.057624 ms
+  per iteration: 0.0057624 ms
+  MLUP/s:        22746.1
+  bandwidth:     363.937 GB/s
+  Passed result check
+NX=262144:
+  #cells / #it:  262144 / 10
+  elapsed time:  0.074572 ms
+  per iteration: 0.0074572 ms
+  MLUP/s:        35153.1
+  bandwidth:     562.45 GB/s
+  Passed result check
+NX=524288:
+  #cells / #it:  524288 / 10
+  elapsed time:  0.260564 ms
+  per iteration: 0.0260564 ms
+  MLUP/s:        20121.3
+  bandwidth:     321.94 GB/s
+  Passed result check
+NX=1048576:
+  #cells / #it:  1048576 / 10
+  elapsed time:  0.470647 ms
+  per iteration: 0.0470647 ms
+  MLUP/s:        22279.5
+  bandwidth:     356.471 GB/s
+  Passed result check
+NX=2097152:
+  #cells / #it:  2097152 / 10
+  elapsed time:  0.88504 ms
+  per iteration: 0.088504 ms
+  MLUP/s:        23695.6
+  bandwidth:     379.129 GB/s
+  Passed result check
+NX=4194304:
+  #cells / #it:  4194304 / 10
+  elapsed time:  1.71696 ms
+  per iteration: 0.171696 ms
+  MLUP/s:        24428.7
+  bandwidth:     390.859 GB/s
+  Passed result check
+NX=8388608:
+  #cells / #it:  8388608 / 10
+  elapsed time:  3.36338 ms
+  per iteration: 0.336338 ms
+  MLUP/s:        24941
+  bandwidth:     399.056 GB/s
+  Passed result check
+NX=16777216:
+  #cells / #it:  16777216 / 10
+  elapsed time:  6.70118 ms
+  per iteration: 0.670118 ms
+  MLUP/s:        25036.2
+  bandwidth:     400.579 GB/s
+  Passed result check
+NX=33554432:
+  #cells / #it:  33554432 / 10
+  elapsed time:  13.2786 ms
+  per iteration: 1.32786 ms
+  MLUP/s:        25269.6
+  bandwidth:     404.314 GB/s
+  Passed result check
+NX=67108864:
+  #cells / #it:  67108864 / 10
+  elapsed time:  26.4913 ms
+  per iteration: 2.64913 ms
+  MLUP/s:        25332.4
+  bandwidth:     405.318 GB/s
+  Passed result check
+NX=134217728:
+  #cells / #it:  134217728 / 10
+  elapsed time:  53.0109 ms
+  per iteration: 5.30109 ms
+  MLUP/s:        25318.9
+  bandwidth:     405.102 GB/s
+  Passed result check
+NX=268435456:
+  #cells / #it:  268435456 / 10
+  elapsed time:  106.152 ms
+  per iteration: 10.6152 ms
+  MLUP/s:        25287.9
+  bandwidth:     404.606 GB/s
+  Passed result check
+NX=536870912:
+  #cells / #it:  536870912 / 10
+  elapsed time:  0.00212 ms
+  per iteration: 0.000212 ms
+  MLUP/s:        2.53241e+09
+  bandwidth:     4.05186e+07 GB/s
+Stream check failed for element 0
+ Expected:  12
+ Actual:    0
+ Difference:-12
+NX=1073741824:
+  #cells / #it:  1073741824 / 10
+  elapsed time:  0.002172 ms
+  per iteration: 0.0002172 ms
+  MLUP/s:        4.94356e+09
+  bandwidth:     7.9097e+07 GB/s
+Stream check failed for element 0
+ Expected:  12
+ Actual:    0
+ Difference:-12
