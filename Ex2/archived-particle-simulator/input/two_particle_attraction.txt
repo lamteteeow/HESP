@@ -1,0 +1,10 @@
+0.5 0.0 0.0  # Position of particle 1 (x, y, z)
+0.0 0.0 0.0  # Position of particle 2 (x, y, z)
+1.0          # Mass of particle 1
+1.0          # Mass of particle 2
+0.0 0.0 0.0  # Initial velocity of particle 1 (vx, vy, vz)
+0.0 0.0 0.0  # Initial velocity of particle 2 (vx, vy, vz)
+0.1          # Time step length
+1000         # Number of time steps
+1.0          # Sigma for Lennard-Jones potential
+1.0          # Epsilon for Lennard-Jones potential

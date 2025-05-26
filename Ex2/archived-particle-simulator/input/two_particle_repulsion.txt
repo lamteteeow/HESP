@@ -1,0 +1,9 @@
+0 0 0  # Particle 1 position (x, y, z)
+1 1 1  # Particle 1 velocity (vx, vy, vz)
+1.0    # Particle 1 mass
+
+5 5 5  # Particle 2 position (x, y, z)
+-1 -1 -1  # Particle 2 velocity (vx, vy, vz)
+1.0    # Particle 2 mass
+
+# The particles are positioned far apart to ensure they repel each other.
