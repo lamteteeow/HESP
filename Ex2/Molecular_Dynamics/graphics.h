@@ -6,7 +6,7 @@ GLFWwindow* window;
 
 void initGraphics() {
     glfwInit();
-    window = glfwCreateWindow(2100, 2100, "MD Vis", NULL, NULL);
+    window = glfwCreateWindow(1400, 800, "MD Vis", NULL, NULL);
     glfwMakeContextCurrent(window);
     glewInit();
     glPointSize(10.0f);
