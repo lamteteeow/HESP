@@ -3,8 +3,9 @@
 #include <stdio.h>
 #include <cuda_runtime.h>
 #include <iostream>
+#include <vector>
 
-int NUM_PARTICLES;
+int NUM_PARTICLES; // Default value, will be set after reading input
 float epsilon, sigma, dt;
 float3* positions;
 float3* velocities;
@@ -96,8 +97,8 @@ int main(int argc, char** argv) {
 	std::vector<float> h_masses;
 	readInput(argv[1], epsilon, sigma, dt, h_positions, h_velocities, h_masses);
 
-	NUM_PARTICLES = h_positions.size();;
-	
+    NUM_PARTICLES = h_positions.size();
+
     cudaMalloc(&positions, NUM_PARTICLES*sizeof(float3));
     cudaMalloc(&velocities, NUM_PARTICLES*sizeof(float3));
     cudaMalloc(&forces, NUM_PARTICLES*sizeof(float3));
@@ -112,10 +113,10 @@ int main(int argc, char** argv) {
     while(!windowShouldClose()) {
         for(int i=0; i<10; i++)
         	simulateStep();
-        
-        float3 curPos[NUM_PARTICLES];
-        cudaMemcpy(curPos, positions, NUM_PARTICLES*sizeof(float3), cudaMemcpyDeviceToHost);
-        
+
+        std::vector<float3> curPos(NUM_PARTICLES);
+        cudaMemcpy(curPos.data(), positions, NUM_PARTICLES * sizeof(float3), cudaMemcpyDeviceToHost);
+
         beginFrame();
         for(int i=0; i<NUM_PARTICLES; i++) {
             drawPoint(curPos[i].x / 10.0f, curPos[i].y / 10.0f);
