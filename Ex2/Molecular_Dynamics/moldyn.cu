@@ -4,6 +4,8 @@
 #include <cuda_runtime.h>
 #include <iostream>
 #include <vector>
+#include <fstream>
+#include <iomanip> // for std::setprecision
 
 // Global variables for simulation parameters and particle data
 int NUM_PARTICLES;        // Number of particles in the simulation
@@ -44,7 +46,6 @@ __global__ void computeForces(float3 *positions,
 
         const float dr_sq = dx * dx + dy * dy + dz * dz;
 
-        // Optional cutoff distance for computational efficiency
         // const float cutoff = 2.5f * sigma;
         // if (dr_sq > cutoff*cutoff) continue;
 
@@ -128,7 +129,196 @@ void simulateStep() {
     cudaDeviceSynchronize();
 }
 
-int main(int argc, char** argv) {
+/**
+ * Export current simulation state to VTK format for visualization in ParaView
+ * Creates a VTK legacy format file with particle positions and velocities
+ */
+void exportToVTK(const std::vector<float3> &positions,
+                 const std::vector<float3> &velocities,
+                 const std::vector<float> &masses,
+                 int timestep)
+{
+    // Create filename with timestep number
+    std::string filename = "./output_vtk/output_" + std::to_string(timestep) + ".vtk";
+    std::ofstream file(filename);
+
+    if (!file.is_open())
+    {
+        std::cerr << "Error: Could not open " << filename << " for writing" << std::endl;
+        return;
+    }
+
+    // Write VTK header
+    file << "# vtk DataFile Version 3.0\n";
+    file << "Molecular Dynamics Simulation - Timestep " << timestep << "\n";
+    file << "ASCII\n";
+    file << "DATASET UNSTRUCTURED_GRID\n\n";
+
+    // Write points (particle positions)
+    file << "POINTS " << NUM_PARTICLES << " float\n";
+    for (int i = 0; i < NUM_PARTICLES; i++)
+    {
+        file << std::fixed << std::setprecision(6)
+             << positions[i].x << " "
+             << positions[i].y << " "
+             << positions[i].z << "\n";
+    }
+    file << "\n";
+
+    // Write cells (each particle is a vertex)
+    file << "CELLS " << NUM_PARTICLES << " " << NUM_PARTICLES * 2 << "\n";
+    for (int i = 0; i < NUM_PARTICLES; i++)
+    {
+        file << "1 " << i << "\n";
+    }
+    file << "\n";
+
+    // Write cell types (1 = VTK_VERTEX)
+    file << "CELL_TYPES " << NUM_PARTICLES << "\n";
+    for (int i = 0; i < NUM_PARTICLES; i++)
+    {
+        file << "1\n";
+    }
+    file << "\n";
+
+    // Write point data (velocities and masses)
+    file << "POINT_DATA " << NUM_PARTICLES << "\n";
+
+    // Velocity vectors
+    file << "VECTORS velocity float\n";
+    for (int i = 0; i < NUM_PARTICLES; i++)
+    {
+        file << std::fixed << std::setprecision(6)
+             << velocities[i].x << " "
+             << velocities[i].y << " "
+             << velocities[i].z << "\n";
+    }
+    file << "\n";
+
+    // Mass scalars
+    file << "SCALARS mass float 1\n";
+    file << "LOOKUP_TABLE default\n";
+    for (int i = 0; i < NUM_PARTICLES; i++)
+    {
+        file << std::fixed << std::setprecision(6) << masses[i] << "\n";
+    }
+    file << "\n";
+
+    // Velocity magnitude for coloring
+    file << "SCALARS velocity_magnitude float 1\n";
+    file << "LOOKUP_TABLE default\n";
+    for (int i = 0; i < NUM_PARTICLES; i++)
+    {
+        float vel_mag = sqrt(velocities[i].x * velocities[i].x +
+                             velocities[i].y * velocities[i].y +
+                             velocities[i].z * velocities[i].z);
+        file << std::fixed << std::setprecision(6) << vel_mag << "\n";
+    }
+
+    file.close();
+    std::cout << "Exported timestep " << timestep << " to " << filename << std::endl;
+}
+
+/**
+ * Calculate and check force conservation using Newton's 3rd law
+ * The sum of all forces should be approximately zero due to action-reaction pairs
+ * Also calculates energy conservation for comparison
+ */
+float calculateEnergy(const std::vector<float3> &positions,
+                      const std::vector<float3> &velocities,
+                      const std::vector<float> &masses,
+                      int timestep)
+{
+    // Copy current forces from GPU to host for analysis
+    std::vector<float3> h_forces(NUM_PARTICLES);
+    cudaMemcpy(h_forces.data(), forces, NUM_PARTICLES * sizeof(float3), cudaMemcpyDeviceToHost);
+
+    // Calculate total force (should be ~0 by Newton's 3rd law)
+    float3 total_force = {0.0f, 0.0f, 0.0f};
+    for (int i = 0; i < NUM_PARTICLES; i++)
+    {
+        total_force.x += h_forces[i].x;
+        total_force.y += h_forces[i].y;
+        total_force.z += h_forces[i].z;
+    }
+
+    // Calculate magnitude of total force
+    float total_force_magnitude = sqrt(total_force.x * total_force.x +
+                                       total_force.y * total_force.y +
+                                       total_force.z * total_force.z);
+
+    // // Calculate individual force magnitudes for context
+    // float max_force_magnitude = 0.0f;
+    // float avg_force_magnitude = 0.0f;
+    // for (int i = 0; i < NUM_PARTICLES; i++)
+    // {
+    //     float force_mag = sqrt(h_forces[i].x * h_forces[i].x +
+    //                            h_forces[i].y * h_forces[i].y +
+    //                            h_forces[i].z * h_forces[i].z);
+    //     avg_force_magnitude += force_mag;
+    //     if (force_mag > max_force_magnitude)
+    //     {
+    //         max_force_magnitude = force_mag;
+    //     }
+    // }
+    // avg_force_magnitude /= NUM_PARTICLES;
+
+    // Calculate energy for additional conservation check
+    float total_kinetic_energy = 0.0f;
+    float total_potential_energy = 0.0f;
+
+    // Calculate kinetic energy: KE = 0.5 * m * v^2
+    for (int i = 0; i < NUM_PARTICLES; i++)
+    {
+        float vel_sq = velocities[i].x * velocities[i].x +
+                       velocities[i].y * velocities[i].y +
+                       velocities[i].z * velocities[i].z;
+        total_kinetic_energy += 0.5f * masses[i] * vel_sq;
+    }
+
+    // Calculate potential energy using Lennard-Jones potential
+    for (int i = 0; i < NUM_PARTICLES; i++)
+    {
+        for (int j = i + 1; j < NUM_PARTICLES; j++)
+        {
+            float dx = positions[i].x - positions[j].x;
+            float dy = positions[i].y - positions[j].y;
+            float dz = positions[i].z - positions[j].z;
+            float r_sq = dx * dx + dy * dy + dz * dz;
+
+            if (r_sq > 0.0f)
+            { // Avoid division by zero
+                float sigma_sq = sigma * sigma;
+                float sigma_over_r_sq = sigma_sq / r_sq;
+                float sigma_over_r6 = sigma_over_r_sq * sigma_over_r_sq * sigma_over_r_sq;
+                float sigma_over_r12 = sigma_over_r6 * sigma_over_r6;
+
+                // V(r) = 4ε[(σ/r)¹² - (σ/r)⁶]
+                total_potential_energy += 4.0f * epsilon * (sigma_over_r12 - sigma_over_r6);
+            }
+        }
+    }
+
+    float total_energy = total_kinetic_energy + total_potential_energy;
+
+    // Output conservation analysis
+    std::cout << std::fixed << std::setprecision(6);
+    std::cout << "=== Conservation Analysis - Timestep " << timestep << " ===" << std::endl;
+    // std::cout << "  Total Force = (" << total_force.x << ", " << total_force.y << ", " << total_force.z << ")" << std::endl;
+    std::cout << "  Total Force Magnitude = " << total_force_magnitude << std::endl;
+    // std::cout << "  Average Individual Force = " << avg_force_magnitude << std::endl;
+    // std::cout << "  Maximum Individual Force = " << max_force_magnitude << std::endl;
+    // std::cout << "  Force Conservation Ratio = " << (avg_force_magnitude > 0 ? total_force_magnitude / avg_force_magnitude : 0.0f) << std::endl;
+
+    // std::cout << "  Kinetic Energy = " << total_kinetic_energy << std::endl;
+    // std::cout << "  Potential Energy = " << total_potential_energy << std::endl;
+    std::cout << "  Total Energy = " << total_energy << std::endl;
+
+    return total_energy;
+}
+
+int main(int argc, char **argv)
+{
     if (argc < 2)
     {
         std::cerr << "No filename provided." << std::endl;
@@ -157,10 +347,44 @@ int main(int argc, char** argv) {
 
     // Initialize graphics system for visualization
     initGraphics();
-    
+
+    int timestep = 0;
+    int file_cycle_interval = 1000;
+    float total_energy = 0.0f;
+
     while(!windowShouldClose()) {
-        for(int i=0; i<10; i++)
+        for (int i = 0; i < 10; i++)
+        {
             simulateStep();
+            timestep++;
+
+            // Export to VTK and check energy conservation at specified intervals
+            if (timestep % file_cycle_interval == 0)
+            {
+                // Copy current data back to host for export
+                std::vector<float3> curPos(NUM_PARTICLES);
+                std::vector<float3> curVel(NUM_PARTICLES);
+
+                cudaMemcpy(curPos.data(), positions, NUM_PARTICLES * sizeof(float3), cudaMemcpyDeviceToHost);
+                cudaMemcpy(curVel.data(), velocities, NUM_PARTICLES * sizeof(float3), cudaMemcpyDeviceToHost);
+
+                // TODO: Export current state to VTK needs to be checked
+                // exportToVTK(curPos, curVel, h_masses, timestep);
+
+                // Current total energy
+                float new_total_energy = calculateEnergy(curPos, curVel, h_masses, timestep);
+
+                // Energy difference from last interval
+                std::cout << "  Total Energy difference from last interval" << std::setprecision(9) << std::fixed
+                          << " (timestep " << timestep << "): "
+                          << new_total_energy - total_energy << std::endl;
+                std::cout << "==============================================" << std::endl
+                          << std::endl;
+
+                // Update total energy for next comparison
+                total_energy = new_total_energy;
+            }
+        }
 
         // Copy current positions back to host for rendering
         std::vector<float3> curPos(NUM_PARTICLES);
@@ -169,7 +393,9 @@ int main(int argc, char** argv) {
         // Render current frame
         beginFrame();
         for(int i=0; i<NUM_PARTICLES; i++) {
-            drawPoint(curPos[i].x / 10.0f, curPos[i].y / 10.0f);
+            // drawPoint(curPos[i].x / 10.0f, curPos[i].y / 10.0f);
+            // drawCircle(curPos[i].x / 10.0f, curPos[i].y / 10.0f, 0.01f, 100);
+            drawFilledCircle(curPos[i].x / 10.0f, curPos[i].y / 10.0f, 0.01f, 100);
         }
         endFrame();
     }

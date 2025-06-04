@@ -6,7 +6,7 @@ GLFWwindow* window;
 
 void initGraphics() {
     glfwInit();
-    window = glfwCreateWindow(1400, 800, "MD Vis", NULL, NULL);
+    window = glfwCreateWindow(900, 900, "MD Vis", NULL, NULL);
     glfwMakeContextCurrent(window);
     glewInit();
     glPointSize(10.0f);
@@ -24,6 +24,33 @@ void beginFrame() {
 void drawPoint(float x, float y) {
     glBegin(GL_POINTS);
     glVertex2f(x, y);
+    glEnd();
+}
+
+void drawCircle(float x, float y, float radius, int num_segments)
+{
+    glBegin(GL_LINE_LOOP);
+    for (int i = 0; i < num_segments; ++i)
+    {
+        float angle = 2.0f * 3.1415926f * float(i) / float(100);
+        float dx = radius * cosf(angle);
+        float dy = radius * sinf(angle);
+        glVertex2f(x + dx, y + dy);
+    }
+    glEnd();
+}
+
+void drawFilledCircle(float x, float y, float radius, int num_segments)
+{
+    glBegin(GL_TRIANGLE_FAN);
+    glVertex2f(x, y); // Center of circle
+    for (int i = 0; i <= num_segments; ++i)
+    {
+        float angle = 2.0f * 3.1415926f * float(i) / float(num_segments);
+        float dx = radius * cosf(angle);
+        float dy = radius * sinf(angle);
+        glVertex2f(x + dx, y + dy);
+    }
     glEnd();
 }
 
