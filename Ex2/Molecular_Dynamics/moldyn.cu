@@ -369,7 +369,7 @@ int main(int argc, char **argv)
                 cudaMemcpy(curVel.data(), velocities, NUM_PARTICLES * sizeof(float3), cudaMemcpyDeviceToHost);
 
                 // TODO: Export current state to VTK needs to be checked
-                // exportToVTK(curPos, curVel, h_masses, timestep);
+                exportToVTK(curPos, curVel, h_masses, timestep);
 
                 // Current total energy
                 float new_total_energy = calculateEnergy(curPos, curVel, h_masses, timestep);
