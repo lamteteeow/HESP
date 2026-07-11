@@ -231,12 +231,11 @@ module load cuda
 
 ## Known issues / TODOs
 
-- `migration.h`: full CPU round-trip on every migration event. Replace with in-GPU compaction (thrust or hand-written prefix-sum) and `cudaMemcpyPeer`.
-- `halo_exchange.h`: CPU-mediated. Replace `collectHalo` download + `uploadHalo` with `cudaMemcpyPeer` for direct GPU-to-GPU transfer.
+- `halo_exchange.h` + `migration.h`: Both use full CPU round-trips for particle data movement — this is the dominant bottleneck. **Particle packing** (GPU-side filtering via stream compaction into contiguous output buffers) and **particle unpacking** (receiving directly via `cudaMemcpyPeer` instead of CPU staging) are the two key techniques needed. See the dedicated task below.
 - `force_kernels.cuh`: uses particle `i`'s material properties only. Implement harmonic-mean effective `kn` and `gamma_n` for multi-material simulations.
 - No periodic boundary conditions in y. Currently reflective walls only.
 - No energy / momentum diagnostics. Add a reduction kernel to monitor conservation.
-- `main.cu`: the neighborhood table (`d_nb0/d_nb1`) is rebuilt after migration even though the cell grid structure never changes. Cache it.
+- `main.cu`: the neighborhood table (`d_nb`) is rebuilt after migration even though the cell grid structure never changes. Cache it.
 
 ---
 
@@ -280,6 +279,12 @@ module load cuda
 - [ ] **Add CUDA error checking**: wrap all CUDA API calls and kernel launches with a `CHECK_CUDA` macro. This is the single most impactful reliability improvement.
 
 - [ ] **Periodic BCs in y**: replace the reflective y-walls with periodic boundaries. Requires wrapping positions and adjusting `computeCellIndex` (use `get_cell_index_for_periodic_boundary` already in `init_neighborhood.h`).
+
+- [ ] **Particle packing/unpacking for GPU-to-GPU transfer** — this is the single highest-impact optimization for multi-GPU performance. The current `collectHalo` + `uploadHalo` and `migrateParticles` both round-trip all particle data through the CPU, which dominates runtime. Replace them with:
+    1. **Particle packing** (on source GPU): a GPU-side filter kernel that writes boundary/crossed particles into a compact contiguous output buffer (use a parallel prefix-sum / scan to compute output offsets). Only the packed buffer is copied to the target GPU via `cudaMemcpyPeer` — no CPU involvement.
+    2. **Particle unpacking** (on target GPU): receive the packed buffer directly into the halo/migration slot. For halo exchange, append packed strips from left+right neighbors after owned particles. For migration, compact owned particles that stay in-place first, then append migrated-in particles.
+    3. **Enable peer access** at startup with `cudaDeviceEnablePeerAccess()`, especially critical on A100 nodes where NVLink makes `cudaMemcpyPeer` nearly free.
+  Reference techniques: GPU stream compaction (CUB/thrust `copy_if` or hand-rolled prefix-sum), `cudaMemcpyPeerAsync` for overlap, double-buffering for pipelining. Target: eliminate all CPU-mediated particle data movement from the hot path.
 
 - [ ] **Optimize migration**: replace `migrateParticles()` full round-trip with GPU-side stream compaction + `cudaMemcpyPeer`. Target: migration cost < halo exchange cost.
 
