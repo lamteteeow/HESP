@@ -71,15 +71,15 @@ inline void loadScene(const std::string &filename, SceneConfig &cfg,
   f >> j;
 
   cfg.dt = j["dt"].get<float>();
-  cfg.gravity = Vec3FromJson(j["gravity"]);
-  cfg.domain_min = Vec3FromJson(j["domain"]["min"]);
-  cfg.domain_max = Vec3FromJson(j["domain"]["max"]);
+  cfg.gravity = vec3FromJson(j["gravity"]);
+  cfg.domain_min = vec3FromJson(j["domain"]["min"]);
+  cfg.domain_max = vec3FromJson(j["domain"]["max"]);
   cfg.cell_size = j.value("cell_size", 0.0f);
 
   float max_r = 0.0f;
   for (const auto &p : j["particles"]) {
-    Vec3 pos = Vec3FromJson(p["position"]);
-    Vec3 vel = Vec3FromJson(p["velocity"]);
+    Vec3 pos = vec3FromJson(p["position"]);
+    Vec3 vel = vec3FromJson(p["velocity"]);
     float r = p["radius"].get<float>();
     max_r = std::max(max_r, r);
     pd.push(pos, vel, p["mass"].get<float>(), r, p["kn"].get<float>(),

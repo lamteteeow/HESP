@@ -296,8 +296,8 @@ module load cuda
 
 - [ ] **Energy diagnostics**: add a device reduction (e.g., thrust::transform_reduce) to compute total kinetic energy each frame. Print it alongside the step count.
 
-- [ ] **Fix include guard in `assign_cells.cuh`**: rename `NEIGHBORHOOD_CUH` to `ASSIGN_CELLS_CUH`.
+- [x] **Fix include guard in `assign_cells.cuh`**: rename `NEIGHBORHOOD_CUH` to `ASSIGN_CELLS_CUH`.
 
 - [ ] **Decouple `Vec3.cuh` from `json.hpp`**: move `Vec3FromJson` to a host-only header or `input.h`.
 
-- [ ] **Standardize naming conventions**: rename functions in `init_neighborhood.h` to camelCase; fix `numOfCellsPerAxis` parameter casing in `computeCellIndex`.
+- [x] **Standardize naming conventions**: rename functions in `init_neighborhood.h` to camelCase; fix `numOfCellsPerAxis` parameter casing in `computeCellIndex`.
