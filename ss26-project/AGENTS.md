@@ -23,17 +23,17 @@ For 2D, `num_cells.z = 1` and all z-coordinates are clamped to 0. Extension to 3
 | File | Role |
 |---|---|
 | `main.cu` | Entry point; simulation loop |
-| `Domain.h` | `Domain` struct + `buildDomains()` for N-GPU X-split |
-| `ParticleDevice.cuh` | GPU pointer struct (owned + halo layout) |
-| `ParticleHost.h` | CPU buffer; `upload()` / `download()` / `freeParticleDevice()` |
+| `domain.h` | `Domain` struct + `buildDomains()` for N-GPU X-split |
+| `particle_device.cuh` | GPU pointer struct (owned + halo layout) |
+| `particle_host.h` | CPU buffer; `upload()` / `download()` / `freeParticleDevice()` |
 | `halo_exchange.h` | `collectHalo()` / `uploadHalo()` / `exchangeHalos()` — N-GPU |
 | `migration.h` | `migrateParticles()` — full CPU round-trip redistribution, N-GPU |
 | `force_kernels.cuh` | `computeContactForces` kernel (spring-dashpot DEM) |
 | `integration.cuh` | `integrate` kernel (symplectic Euler, reflective walls) |
 | `assign_cells.cuh` | `assignCell` kernel + `computeCellIndex` (from mini-project) |
 | `init_neighborhood.h` | `initCellNeighborhood()` — CPU-side 27-neighbor table (from mini-project) |
-| `Cells.cuh` | `Cells` helper struct (from mini-project) |
-| `Vec3.cuh` | `Vec3` math type + free functions (from mini-project) |
+| `cells.cuh` | `Cells` helper struct (from mini-project) |
+| `vec3.cuh` | `Vec3` math type + free functions (from mini-project) |
 | `vtk_output.h` | `writeParticlesVTK()` — positions, velocities, radii |
 | `input.h` | `loadScene()` / `splitAt()` — JSON parsing |
 | `json.hpp` | nlohmann/json single-header (from mini-project) |
@@ -101,8 +101,8 @@ Output goes to `out_vtk_<scene>_<steps>/`. Open in ParaView; use "Glyph" filter 
 ### Files
 | Category | Convention | Examples |
 |---|---|---|
-| Header files (host-only) | `snake_case.h` | `Domain.h`, `input.h`, `vtk_output.h` |
-| Header files (device/host) | `snake_case.cuh` | `Vec3.cuh`, `force_kernels.cuh` |
+| Header files (host-only) | `snake_case.h` | `domain.h`, `input.h`, `vtk_output.h` |
+| Header files (device/host) | `snake_case.cuh` | `vec3.cuh`, `force_kernels.cuh` |
 | Source files | `snake_case.cu` | `main.cu` |
 | Python scripts | `snake_case.py` | `gen_lattice.py` |
 | Scene files | `snake_case.json` | `two_discs.json` |
@@ -120,11 +120,7 @@ Output goes to `out_vtk_<scene>_<steps>/`. Open in ParaView; use "Glyph" filter 
 | Host vectors prefix | (none) or `h_` in halo exchange | `positions`, `h_pos` |
 
 ### Inconsistencies to fix
-- `init_neighborhood.h` uses `lowerCamelCase` and `snake_case` mixed for function names (e.g. `initCellNeighborhood` vs `get_cell_index_for_periodic_boundary`). Prefer consistent `camelCase` for functions.
-- `assign_cells.cuh` has include guard `NEIGHBORHOOD_CUH` but the file is `assign_cells.cuh`. Should be `ASSIGN_CELLS_CUH`.
-- `Vec3.cuh` uses `__host__`-only JSON function (`Vec3FromJson`) inside a `.cuh` header; move to a host-only utility or `input.h`.
-- `computeCellIndex` parameter `numOfCellsPerAxis` uses PascalCase parameter name — inconsistent with the rest of the code (prefer `snake_case` params).
-- Variable naming conflict: `computeCellIndex()` parameter `cellL` collides in style with `cell_size` used elsewhere. Pick one.
+- `vec3.cuh` includes `json.hpp` (~25k lines) for a single `__host__`-only function (`vec3FromJson`). This increases compile times for every translation unit that includes `vec3.cuh`. Move `vec3FromJson` to a host-only header or `input.h`.
 
 ---
 
@@ -249,11 +245,9 @@ module load cuda
 3. **`main.cu` — no error check on `cudaSetDevice`.** If device 0 or 1 is unavailable or in prohibited mode, subsequent operations silently operate on the wrong device or fail.
 
 ### Medium severity
-4. **`assign_cells.cuh` include guard mismatch.** The guard uses `NEIGHBORHOOD_CUH` but the file is `assign_cells.cuh`. This is misleading and could cause subtle issues if a file named `neighborhood.cuh` is added later.
+4. **`vec3.cuh` includes `json.hpp`.** A math utility header pulls in the entire nlohmann/json library (~25k lines) for a single host-only function (`vec3FromJson`). This increases compile times for every translation unit that includes `vec3.cuh`. Move `vec3FromJson` to `input.h` or a dedicated utility header.
 
-5. **`Vec3.cuh` includes `json.hpp`.** A math utility header pulls in the entire nlohmann/json library (~25k lines) for a single host-only function (`Vec3FromJson`). This increases compile times for every translation unit that includes `Vec3.cuh`. Move `Vec3FromJson` to `input.h` or a dedicated utility header.
-
-6. **`Vec3::ceil()` uses `std::ceil`** which may not be available in device code on all CUDA toolkit versions (though it is supported since CUDA 10+). Use plain `ceilf()` for maximum portability.
+5. **`vec3::ceil()` uses `std::ceil`** which may not be available in device code on all CUDA toolkit versions (though it is supported since CUDA 10+). Use plain `ceilf()` for maximum portability.
 
 7. **`computeContactForces` comment says `d_gamma_t`/`d_mu` are "size n/2"** but they are actually allocated as `capacity/2 = total_n` which is >= `n`. The comment is misleading — the actual allocation is correct but could confuse maintainers.
 

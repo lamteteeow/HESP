@@ -1,6 +1,6 @@
 #ifndef DOMAIN_H
 #define DOMAIN_H
-#include "Vec3.cuh"
+#include "vec3.cuh"
 #include <algorithm>
 #include <cmath>
 #include <vector>

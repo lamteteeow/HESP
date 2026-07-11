@@ -1,8 +1,8 @@
 #ifndef INPUT_H
 #define INPUT_H
 
-#include "Domain.h"
-#include "Vec3.cuh"
+#include "domain.h"
+#include "vec3.cuh"
 #include "json.hpp"
 #include <fstream>
 #include <stdexcept>

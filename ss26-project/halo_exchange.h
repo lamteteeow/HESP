@@ -1,9 +1,9 @@
 #ifndef HALO_EXCHANGE_H
 #define HALO_EXCHANGE_H
 
-#include "Domain.h"
-#include "ParticleDevice.cuh"
-#include "Vec3.cuh"
+#include "domain.h"
+#include "particle_device.cuh"
+#include "vec3.cuh"
 #include <cuda_runtime.h>
 #include <vector>
 

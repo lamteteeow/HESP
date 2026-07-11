@@ -405,3 +405,18 @@ FodyWeavers.xsd
 
 # JetBrains Rider
 *.sln.iml
+
+# CUDA / Linux build artifacts
+*.pgm
+*.sec
+*.nvvp
+*.qdrep
+
+# Windows shortcuts
+*.lnk
+
+# Build output directories
+build/
+
+# Mini-project simulation output
+out_vtk_*/

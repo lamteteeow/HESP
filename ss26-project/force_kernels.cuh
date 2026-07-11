@@ -1,6 +1,6 @@
 #ifndef FORCE_KERNELS_CUH
 #define FORCE_KERNELS_CUH
-#include "Vec3.cuh"
+#include "vec3.cuh"
 #include <cuda_runtime.h>
 
 // Spring-dashpot (DEM) contact force kernel.

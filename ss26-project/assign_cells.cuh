@@ -6,7 +6,7 @@
 #define ASSIGN_CELLS_CUH
 #include <cuda_runtime.h>
 
-#include "Vec3.cuh"
+#include "vec3.cuh"
 
 __device__ inline int computeCellIndex(const int3 num_cells_per_axis,
                                        const Vec3 offset, const float cell_size,

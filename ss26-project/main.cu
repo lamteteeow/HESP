@@ -4,9 +4,9 @@
 #include <string>
 #include <vector>
 
-#include "Domain.h"
-#include "ParticleDevice.cuh"
-#include "ParticleHost.h"
+#include "domain.h"
+#include "particle_device.cuh"
+#include "particle_host.h"
 #include "assign_cells.cuh"
 #include "force_kernels.cuh"
 #include "halo_exchange.h"

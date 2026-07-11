@@ -1,10 +1,10 @@
 #ifndef MIGRATION_H
 #define MIGRATION_H
 
-#include "Domain.h"
-#include "ParticleDevice.cuh"
-#include "ParticleHost.h"
-#include "Vec3.cuh"
+#include "domain.h"
+#include "particle_device.cuh"
+#include "particle_host.h"
+#include "vec3.cuh"
 #include <cuda_runtime.h>
 #include <vector>
 
