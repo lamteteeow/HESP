@@ -66,8 +66,6 @@ login node (`tinyx`) — build on a compute node, or from a job script.
 # Get a compute node first
 salloc.tinygpu --gres=gpu:1 --time=01:00:00
 
-# Load GCC first (CUDA 12.8 requires host compiler ≥ GCC 10)
-module load gcc/11.5.0
 module load cuda/12.8.0
 
 make
@@ -78,7 +76,6 @@ make
 | Module | Version | Why |
 |---|---|---|
 | `cuda` | `12.8.0` | Latest toolkit — best nvcc optimizer, full sm_70–sm_86 support |
-| `gcc` | `11.5.0` | CUDA 12.8 requires host compiler ≥ GCC 10; 11.5 is the most compatible version on TinyGPU. **GCC 14 is not supported by CUDA 12.8.** |
 
 The project uses only core CUDA Runtime API calls (`cudaMalloc`, `cudaMemcpy`,
 `cudaSetDevice`, `cudaDeviceEnablePeerAccess`, etc.) — no cuBLAS, cuFFT, CUB,

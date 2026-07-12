@@ -18,14 +18,9 @@ make md2d         # 2D binary (z=0 enforced, X-only split)
 salloc.tinygpu --gres=gpu:1 --time=01:00:00
 
 # Load modules and build
-module load gcc/11.5.0 cuda/12.8.0
+module load cuda/12.8.0
 make
 ```
-
-| Module | Version | Why |
-|---|---|---|
-| `cuda` | `12.8.0` | Latest toolkit, best codegen for sm_70–sm_86 |
-| `gcc` | `11.5.0` | CUDA 12.8 requires host compiler ≥ GCC 10 |
 
 Batch submission:
 ```bash

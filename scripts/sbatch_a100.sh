@@ -31,7 +31,6 @@ echo "Max steps:  $MAX_STEPS"
 echo "Num GPUs:   $NUM_GPUS"
 
 # ---- Load modules ----
-module load gcc/11.5.0
 module load cuda/12.8.0
 
 # ---- Build ----
