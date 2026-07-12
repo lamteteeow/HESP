@@ -36,9 +36,10 @@ Usage: `./md2d <scene.json> [max_steps] [num_gpus] [vtk_interval]`
 
 ### Per-step loop
 
-1. **Halo exchange** — each GPU collects boundary strips (X, Y, Z) of width
-   `halo_width = 2 × r_max` and sends them to neighbors. Received strips are
-   appended as read-only ghost particles after the owned array.
+1. **Halo exchange** — each GPU packs boundary strips via a GPU-side
+   filter kernel (atomic-add compaction into contiguous buffers),
+   then exchanges directly via `cudaMemcpyPeer`. Only 4-byte
+   particle counts cross the CPU bus. Up to 6 directions in 3D.
 2. **Cell assignment** — all particles (owned + halo) are inserted into a
    uniform cell grid via atomic linked-list prepend. 27-neighbor lookup table
    is precomputed at startup.
@@ -90,6 +91,8 @@ full 3D decomposition for best load balance.
 ## Features
 
 - **Cell-based neighbor search** — O(N) per step with 27-neighbor lookup
+- **GPU-direct halo exchange** — GPU-side particle packing + `cudaMemcpyPeer`;
+  no CPU staging of particle data in the hot path
 - **Persistent particle IDs** — assigned at load, survive migration,
   enable stable ParaView animation without flicker
 - **Energy diagnostics** — kinetic energy and momentum (x, y, z)
@@ -148,7 +151,8 @@ load them all as a ParaView time series.
 | `domain.h` | `Domain` struct + `buildDomains()` for N-GPU 3D grid decomposition |
 | `particle_device.cuh` | GPU pointer struct (owned + halo layout) |
 | `particle_host.h` | CPU buffer; `upload()` / `download()` / `freeParticleDevice()` |
-| `halo_exchange.h` | `collectHalo()` / `uploadHalo()` / `exchangeHalos()` — N-GPU, ±X±Y±Z |
+| `halo_exchange.h` | `packStrip()` / `exchangeHalos()` — GPU-side packing + `cudaMemcpyPeer`, N-GPU ±X±Y±Z |
+| `pack_halo.cuh` | `packHaloParticles` kernel — GPU-side filter/compaction into contiguous buffers |
 | `migration.h` | `migrateParticles()` — full CPU round-trip redistribution, XYZ grid |
 | `force_kernels.cuh` | `computeContactForces` kernel (spring-dashpot DEM) |
 | `integration.cuh` | `integrate` kernel (symplectic Euler, reflective walls) |

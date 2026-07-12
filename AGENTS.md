@@ -9,7 +9,7 @@ In 3D mode (`make md3d`, `-DMD3D`), the domain is split into a **3D nx×ny×nz g
 halo particles across all three axes. 2D mode uses X-only split.
 
 At each step:
-1. **Halo exchange** — each GPU sends boundary strips (X and Y) to neighbors and receives their strips as ghost/read-only particles.
+1. **Halo exchange** — each GPU packs boundary strips via a GPU-side filter kernel (atomic-add compaction into contiguous buffers), then exchanges directly via `cudaMemcpyPeer`. Only 4-byte counts cross the CPU bus.
 2. **Cell assignment** — all particles (owned + halo) are inserted into a uniform cell grid local to each GPU.
 3. **Force computation** — spring-dashpot (DEM) contact forces, computed only for owned particles.
 4. **Integration** — symplectic Euler, z=0 constraint enforced in 2D, reflective wall BCs on all axes.
@@ -26,8 +26,9 @@ For 2D, `num_cells.z = 1` and all z-coordinates are clamped to 0. For 3D, compil
 | `domain.h` | `Domain` struct + `buildDomains()` for N-GPU X-split |
 | `particle_device.cuh` | GPU pointer struct (owned + halo layout) |
 | `particle_host.h` | CPU buffer; `upload()` / `download()` / `freeParticleDevice()` |
-| `halo_exchange.h` | `collectHalo()` / `uploadHalo()` / `exchangeHalos()` — N-GPU |
-| `migration.h` | `migrateParticles()` — full CPU round-trip redistribution, N-GPU |
+| `halo_exchange.h` | `packStrip()` / `exchangeHalos()` — GPU-side packing + `cudaMemcpyPeer`, N-GPU ±X±Y±Z |
+| `pack_halo.cuh` | `packHaloParticles` kernel — GPU-side filter/compaction into contiguous buffers |
+| `migration.h` | `migrateParticles()` — full CPU round-trip redistribution, XYZ grid |
 | `force_kernels.cuh` | `computeContactForces` kernel (spring-dashpot DEM) |
 | `integration.cuh` | `integrate` kernel (symplectic Euler, reflective walls) |
 | `assign_cells.cuh` | `assignCell` kernel + `computeCellIndex` (from mini-project) |
@@ -147,7 +148,7 @@ Output goes to `output/<scene>_<steps>/`. Open in ParaView; use "Glyph" filter w
 
 - **Owned vs halo layout**: `d_positions[0..n)` = owned (read-write); `d_positions[n..n_total)` = halo (read-only after exchange). Both are passed to `assignCell` so the cell grid contains all particles. Only owned particles are force-computed and integrated.
 - **Capacity**: each GPU pre-allocates `2 * total_N` slots so the worst-case migration (all particles on one GPU) fits without reallocation.
-- **N-GPU halo exchange**: each GPU collects boundary strips (X and Y) independently, then uploads strips received from neighbors as halo. Edge GPUs exchange on one side only. In 3D mode, exchanges in up to 4 directions.
+- **N-GPU halo exchange**: each GPU packs boundary strips via a GPU-side filter kernel (atomic-add compaction into contiguous buffers), then exchanges directly via `cudaMemcpyPeer`. Only 4-byte counts cross the CPU bus. In 3D mode, exchanges in up to 6 directions (±X, ±Y, ±Z).
 - **N-GPU migration**: downloads all owned particles from all GPUs, merges, re-splits across the 2D grid (X and Y), and re-uploads.
 - **Material properties**: force kernel uses particle `i`'s `kn`, `gamma_n`, `gamma_t`, `mu` for both sides of a contact — valid for uniform materials. For mixed materials, use effective (harmonic mean) values.
 - **Neighborhood table** (one `d_nb` per GPU): built once at startup per domain and never changes. Only `d_cellHeads` is reset each step.
