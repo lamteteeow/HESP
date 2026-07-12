@@ -3,6 +3,10 @@
 A spring-dashpot DEM (Discrete Element Method) simulator with **N-GPU domain
 decomposition**.
 
+2D mode: domain split along X into N slices, one per GPU.
+3D mode: domain split into a 2D **nx×ny grid** (factored from N GPUs)
+with up to 4 halo neighbors per GPU.
+
 ## Build
 
 ```bash
@@ -23,25 +27,57 @@ make
 ./md3d scenes/cube8.json   5000  4     # 3D, auto-decomposes into 2×2 grid
 ```
 
+Usage: `./md2d <scene.json> [max_steps] [num_gpus]`
+- `max_steps` defaults to 100000
+- `num_gpus` defaults to all available CUDA devices
+
+## Algorithm
+
+### Per-step loop
+
+1. **Halo exchange** — each GPU collects boundary strips (X and Y) of width
+   `halo_width = 2 × r_max` and sends them to neighbors. Received strips are
+   appended as read-only ghost particles after the owned array.
+2. **Cell assignment** — all particles (owned + halo) are inserted into a
+   uniform cell grid via atomic linked-list prepend. 27-neighbor lookup table
+   is precomputed at startup.
+3. **Force computation** — spring-dashpot contact forces (normal spring +
+   dashpot, tangential viscous + Coulomb friction) computed for owned
+   particles only, against all particles in neighboring cells (including
+   halo). Material properties use harmonic mean for mixed contacts.
+4. **Integration** — symplectic Euler: velocity update `v += dt × F/m`,
+   position update `x += dt × v`. Reflective walls on all axes. 2D mode
+   clamps z=0.
+5. **Particle migration** — if any particle crosses its owning region,
+   all particles are downloaded, merged, re-split across the GPU grid
+   by (x, y) position, and re-uploaded.
+
+### Domain decomposition
+
+- **2D mode** (`make`): X-only split into N equal slices. ny=1.
+- **3D mode** (`make md3d`): N GPUs factored into near-square nx×ny grid
+  (e.g. 4→2×2, 6→3×2, 8→4×2). Each GPU owns a rectangular patch.
+- Halo width = `2 × r_max` — guarantees any particle that can contact a
+  neighbor across a boundary is present as a ghost on both sides.
+- Edge GPUs have no halo padding on the domain boundary side.
+
+### Memory layout
+
+- `d_positions[0..n)` = owned particles (read-write, integrated).
+- `d_positions[n..n_total)` = halo particles (read-only after exchange,
+  used only for contact detection).
+- Capacity = `2 × total_N` — worst-case scenario where all particles
+  migrate to a single GPU.
+- Forces, gamma_t, mu are owned-only (sized `capacity/2`).
+
 ## Features
 
-- **2D grid domain decomposition** — 3D mode factors N GPUs into a near-square
-  nx×ny grid (e.g. 4→2×2, 6→3×2). Each GPU exchanges halos with up to 4
-  neighbors. 2D mode uses X-only split.
-- **Cell-based neighbor search** — uniform grid with 27-neighbor lookup table,
-  O(N) per step.
-- **Spring-dashpot DEM** — normal and tangential contact forces with Coulomb
-  friction.
-- **Symplectic Euler integration** — reflective domain walls on all axes.
-  2D enforces z=0; 3D allows free z motion.
-- **Particle migration** — particles crossing their owning region are
-  redistributed across the GPU grid.
-- **Energy diagnostics** — kinetic energy and momentum printed per frame.
-- **VTK output** — per-frame ParaView time series with:
-  - Positions, velocities, radii (glyph as spheres)
-  - `gpu_owner` scalar — color particles by owning GPU
-  - `border` scalar — 0→1 gradient showing halo proximity at GPU boundaries
-  - `domain_boundary.vtk` — wireframe box, GPU split lines, filled halo strips
+- **Cell-based neighbor search** — O(N) per step with 27-neighbor lookup
+- **Persistent particle IDs** — assigned at load, survive migration,
+  enable stable ParaView animation without flicker
+- **Energy diagnostics** — kinetic energy and momentum (x, y, z)
+  accumulated across all GPUs via parallel reduction, printed per frame
+- **P2P peer access** — enabled between all GPU pairs at startup
 
 ## Scene format
 
@@ -63,20 +99,51 @@ Generate scenes with the bundled scripts:
 
 ```bash
 python3 scripts/gen_random.py   > scenes/my_2d.json    # 2D random
-python3 scripts/gen_lattice.py  > scenes/lattice.json  # 2D lattice
+python3 scripts/gen_lattice.py  > scenes/lattice.json  # 2D hexagonal lattice
 python3 scripts/gen_random3d.py > scenes/my_3d.json    # 3D random
 ```
 
 ## Visualization
 
-1. Download the `output/` directory to your local machine.
-2. Open ParaView, `File → Open` → select all `.vtk` files in the output
-   directory (they load as a time series). Include `domain_boundary.vtk`
-   to see the domain wireframe, GPU split lines, and halo strips.
+VTK output lands in `output/<scene>_<steps>/`. Each frame is one file;
+load them all as a ParaView time series.
+
+1. Download `output/` to your local machine.
+2. `File → Open` → select all `.vtk` files. Include `domain_boundary.vtk`
+   for the domain wireframe, GPU split lines, and halo volume boxes.
 3. Click `Apply`.
-4. Add a `Glyph` filter, set **Glyph Type** to `Sphere`, scale by the
-   `radius` scalar. In Glyph properties, set **Masking → Glyph Mode**
-   to `All Points` to avoid radius interpolation artifacts.
-5. Color particles by `gpu_owner` to see which GPU owns each, or by
-   `border` to see the halo overlap gradient at GPU boundaries.
+4. `Filters → Glyph`, set **Glyph Type** to `Sphere`, scale by `radius`.
+   In Glyph properties: **Masking → Glyph Mode** → `All Points`.
+5. Color particles:
+   - `gpu_owner` — discrete per-GPU coloring
+   - `border` — 0→1 gradient showing halo proximity at GPU boundaries
+   - `velocity` — vector field for arrow/direction coloring
 6. Click `Play` to animate.
+
+### File map
+
+| File | Role |
+|---|---|
+| `main.cu` | Entry point; simulation loop |
+| `domain.h` | `Domain` struct + `buildDomains()` for 2D grid decomposition |
+| `particle_device.cuh` | GPU pointer struct (owned + halo layout) |
+| `particle_host.h` | CPU buffer; `upload()` / `download()` / `freeParticleDevice()` |
+| `halo_exchange.h` | `collectHalo()` / `uploadHalo()` / `exchangeHalos()` — N-GPU, XY |
+| `migration.h` | `migrateParticles()` — full CPU round-trip redistribution, XY grid |
+| `force_kernels.cuh` | `computeContactForces` kernel (spring-dashpot DEM) |
+| `integration.cuh` | `integrate` kernel (symplectic Euler, reflective walls) |
+| `assign_cells.cuh` | `assignCell` kernel + `computeCellIndex` |
+| `init_neighborhood.h` | `initCellNeighborhood()` — CPU-side 27-neighbor table |
+| `cells.cuh` | `Cells` helper struct |
+| `vec3.cuh` | `Vec3` math type + free functions |
+| `vtk_output.h` | `writeParticlesVTK()` + `writeDomainBoundaryVTK()` |
+| `input.h` | `loadScene()` / `splitAt()` / `splitIntoN()` — JSON parsing |
+| `json.hpp` | nlohmann/json single-header |
+| `check_cuda.h` | `CHECK_CUDA` / `CHECK_LAST_CUDA` macros |
+| `energy_diagnostics.cuh` | `computeEnergyAndMomentum` kernel + helper |
+| `Makefile` | Build system (`make` / `make md3d` / `make clean`) |
+| `scripts/gen_lattice.py` | 2D hexagonal lattice scene generator |
+| `scripts/gen_random.py` | 2D random particle scene generator |
+| `scripts/gen_random3d.py` | 3D random particle scene generator |
+| `scripts/sbatch_a100.sh` | Slurm batch script for A100 partition |
+| `scripts/sbatch_work.sh` | Slurm batch script for work partition |
