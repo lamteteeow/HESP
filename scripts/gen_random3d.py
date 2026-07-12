@@ -10,6 +10,8 @@ DT      = 0.0002
 VEL_MAX = 8.0
 R_MIN   = 0.3
 R_MAX   = 0.5
+MASS_MIN = 0.5
+MASS_MAX = 1.5
 
 # Softer DEM parameters for visible deformation on collision
 KN      = 1000.0
