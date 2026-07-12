@@ -1,13 +1,39 @@
-# md2d — GPU-accelerated 2D/3D molecular dynamics
+# md2d — GPU-accelerated 3D DEM simulator with N-GPU domain decomposition
 
-Spring-dashpot DEM simulator with **N-GPU 3D domain decomposition**
-(nx×ny×nz grid, factored from N GPUs).
+Spring-dashpot DEM (Discrete Element Method) with **nx×ny×nz grid decomposition**
+(factored from N GPUs). Each GPU exchanges halo particles in up to 6 directions
+via GPU-side packing + `cudaMemcpyPeer`.
 
 ## Build
 
 ```bash
 make              # 3D binary (default)
 make md2d         # 2D binary (z=0 enforced, X-only split)
+```
+
+### TinyGPU cluster (NHR@FAU)
+
+```bash
+# Get a compute node
+salloc.tinygpu --gres=gpu:1 --time=01:00:00
+
+# Load modules and build
+module load gcc/11.5.0 cuda/12.8.0
+make
+```
+
+| Module | Version | Why |
+|---|---|---|
+| `cuda` | `12.8.0` | Latest toolkit, best codegen for sm_70–sm_86 |
+| `gcc` | `11.5.0` | CUDA 12.8 requires host compiler ≥ GCC 10 |
+
+Batch submission:
+```bash
+# A100 (2 GPUs, NVLink)
+sbatch.tinygpu scripts/sbatch_a100.sh scenes/cube256.json 50000 2
+
+# Work partition (1 GPU, RTX 2080 Ti / 3080)
+sbatch.tinygpu scripts/sbatch_work.sh scenes/cube8.json 5000
 ```
 
 ## Run
@@ -82,3 +108,12 @@ python3 scripts/gen_random.py   > scenes/my_2d.json
 | `energy_diagnostics.cuh` | KE + momentum reduction |
 | `scripts/gen_random3d.py` | 3D scene generator |
 | `scripts/sbatch_*.sh` | Slurm batch scripts |
+
+## Cluster hardware
+
+| Partition | GPUs/node | Type |
+|---|---|---|
+| `a100` | 4× | A100 SXM4 (NVLink, 40 GB) |
+| `work` | 4× | RTX 2080 Ti (11 GB) |
+| `work` | 8× | RTX 3080 (10 GB) |
+| `v100` | 4× | Tesla V100 (32 GB) |
