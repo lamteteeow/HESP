@@ -2,15 +2,11 @@
 
 ## What this project is
 
-A GPU-accelerated 2D molecular dynamics / DEM simulator with **N-GPU domain decomposition**.
-
-The simulation domain is split evenly along the X axis into N slices, one per GPU.
-Each GPU owns particles in its slice and exchanges halo particles with its left
-and right neighbors. Interior GPUs have two halo neighbors; edge GPUs have one.
+A GPU-accelerated 2D/3D molecular dynamics / DEM simulator with **N-GPU domain decomposition**.
 
 In 3D mode (`make md3d`, `-DMD3D`), the domain is split into a **2D nx×ny grid**
-(factored from N GPUs). Each GPU has up to 4 neighbors (L/R/B/T). 2D mode uses
-X-only split.
+(factored from N GPUs). Each GPU has up to 4 neighbors (L/R/B/T) and exchanges
+halo particles across all four boundaries. 2D mode uses X-only split.
 
 At each step:
 1. **Halo exchange** — each GPU sends boundary strips (X and Y) to neighbors and receives their strips as ghost/read-only particles.
@@ -344,7 +340,7 @@ sbatch.tinygpu scripts/sbatch_work.sh scenes/two_discs.json 10000
 
 - [ ] **Optimize halo exchange**: replace `collectHalo` CPU download with `cudaMemcpyPeer` (direct GPU-to-GPU). Enable peer access at startup with `cudaDeviceEnablePeerAccess`.
 
-- [ ] **Extend to 3D**: remove `z=0` constraint in `integration.cuh`, set `num_cells.z > 1` in `buildDomains()`, update JSON scenes. No other file changes required.
+- [x] **Extend to 3D**: remove `z=0` constraint in `integration.cuh`, set `num_cells.z > 1` in `buildDomains()`, update JSON scenes. No other file changes required.
 
 - [x] **Extend to N GPUs**: generalize `buildDomains()` to split the X axis into N equal slices, one per GPU. Each interior GPU then has two halo neighbors (left and right); adjust `exchangeHalos()` accordingly.
 

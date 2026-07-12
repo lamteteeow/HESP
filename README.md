@@ -3,15 +3,15 @@
 A spring-dashpot DEM (Discrete Element Method) simulator with **N-GPU domain
 decomposition**.
 
-2D mode: domain split along X into N slices, one per GPU.
-3D mode: domain split into a 2D **nx×ny grid** (factored from N GPUs)
-with up to 4 halo neighbors per GPU.
+In 3D mode (`make md3d`, `-DMD3D`), the domain is split into a **2D nx×ny grid**
+(factored from N GPUs). Each GPU has up to 4 neighbors (L/R/B/T) and exchanges
+halo particles across all four boundaries. 2D mode uses X-only split.
 
 ## Build
 
 ```bash
-make                     # 2D binary (CUDA toolkit ≥ 11.0 required)
-make md3d                # 3D binary (defines MD3D)
+make                     # 2D binary (z=0 enforced, X-only split)
+make md3d                # 3D binary (full 3D, 2D grid decomposition)
 ```
 
 On the TinyGPU cluster:
@@ -54,9 +54,10 @@ Usage: `./md2d <scene.json> [max_steps] [num_gpus]`
 
 ### Domain decomposition
 
-- **2D mode** (`make`): X-only split into N equal slices. ny=1.
 - **3D mode** (`make md3d`): N GPUs factored into near-square nx×ny grid
-  (e.g. 4→2×2, 6→3×2, 8→4×2). Each GPU owns a rectangular patch.
+  (e.g. 4→2×2, 6→3×2, 8→4×2). Each GPU owns a rectangular XY patch spanning
+  the full Z range, with up to 4 halo neighbors.
+- **2D mode** (`make`): X-only split into N equal slices. ny=1.
 - Halo width = `2 × r_max` — guarantees any particle that can contact a
   neighbor across a boundary is present as a ghost on both sides.
 - Edge GPUs have no halo padding on the domain boundary side.
