@@ -4,6 +4,7 @@
 #include "domain.h"
 #include "particle_device.cuh"
 #include "vec3.cuh"
+#include <cstdio>
 #include <cuda_runtime.h>
 #include <vector>
 
@@ -21,14 +22,18 @@ inline void collectHalo(const ParticleDevice &pd, float strip_lo,
   std::vector<Vec3> pos(n), vel(n);
   std::vector<float> rad(n), kn(n), gn(n);
 
-  cudaMemcpy(pos.data(), pd.d_positions, n * sizeof(Vec3),
-             cudaMemcpyDeviceToHost);
-  cudaMemcpy(vel.data(), pd.d_velocities, n * sizeof(Vec3),
-             cudaMemcpyDeviceToHost);
-  cudaMemcpy(rad.data(), pd.d_radii, n * sizeof(float), cudaMemcpyDeviceToHost);
-  cudaMemcpy(kn.data(), pd.d_kn, n * sizeof(float), cudaMemcpyDeviceToHost);
-  cudaMemcpy(gn.data(), pd.d_gamma_n, n * sizeof(float),
-             cudaMemcpyDeviceToHost);
+  cudaError_t err;
+  auto cp = [&](void *h, const void *d, size_t bytes, const char *name) {
+    err = cudaMemcpy(h, d, bytes, cudaMemcpyDeviceToHost);
+    if (err != cudaSuccess)
+      fprintf(stderr, "CUDA error in collectHalo %s: %s\n", name,
+              cudaGetErrorString(err));
+  };
+  cp(pos.data(), pd.d_positions, n * sizeof(Vec3), "d_positions");
+  cp(vel.data(), pd.d_velocities, n * sizeof(Vec3), "d_velocities");
+  cp(rad.data(), pd.d_radii, n * sizeof(float), "d_radii");
+  cp(kn.data(), pd.d_kn, n * sizeof(float), "d_kn");
+  cp(gn.data(), pd.d_gamma_n, n * sizeof(float), "d_gamma_n");
 
   h_pos.clear();
   h_vel.clear();
@@ -62,16 +67,18 @@ inline void uploadHalo(ParticleDevice &pd, const std::vector<Vec3> &h_pos,
   const size_t off = pd.n_total; // append after current end
   pd.n_total += nh;
 
-  cudaMemcpy(pd.d_positions + off, h_pos.data(), nh * sizeof(Vec3),
-             cudaMemcpyHostToDevice);
-  cudaMemcpy(pd.d_velocities + off, h_vel.data(), nh * sizeof(Vec3),
-             cudaMemcpyHostToDevice);
-  cudaMemcpy(pd.d_radii + off, h_rad.data(), nh * sizeof(float),
-             cudaMemcpyHostToDevice);
-  cudaMemcpy(pd.d_kn + off, h_kn.data(), nh * sizeof(float),
-             cudaMemcpyHostToDevice);
-  cudaMemcpy(pd.d_gamma_n + off, h_gn.data(), nh * sizeof(float),
-             cudaMemcpyHostToDevice);
+  cudaError_t err;
+  auto cp = [&](void *d, const void *h, size_t bytes, const char *name) {
+    err = cudaMemcpy(d, h, bytes, cudaMemcpyHostToDevice);
+    if (err != cudaSuccess)
+      fprintf(stderr, "CUDA error in uploadHalo %s: %s\n", name,
+              cudaGetErrorString(err));
+  };
+  cp(pd.d_positions + off, h_pos.data(), nh * sizeof(Vec3), "d_positions");
+  cp(pd.d_velocities + off, h_vel.data(), nh * sizeof(Vec3), "d_velocities");
+  cp(pd.d_radii + off, h_rad.data(), nh * sizeof(float), "d_radii");
+  cp(pd.d_kn + off, h_kn.data(), nh * sizeof(float), "d_kn");
+  cp(pd.d_gamma_n + off, h_gn.data(), nh * sizeof(float), "d_gamma_n");
 }
 
 // Halo exchange across N GPU sub-domains split along the X axis.
@@ -100,9 +107,11 @@ inline void exchangeHalos(std::vector<ParticleDevice> &pds,
   // --- Phase 1: collect boundary strips from each GPU ---
   for (int g = 0; g < num_gpus; ++g) {
     const Domain &dom = doms[g];
-    cudaSetDevice(g);
-
-    // Collect strip for right neighbor (if any)
+    cudaError_t err = cudaSetDevice(g);
+    if (err != cudaSuccess)
+      fprintf(stderr,
+              "CUDA error in exchangeHalos collect cudaSetDevice(%d): %s\n", g,
+              cudaGetErrorString(err));
     if (dom.right_neighbor >= 0) {
       const float lo = dom.owned_max.x - dom.halo_width;
       const float hi = dom.owned_max.x;
@@ -122,7 +131,11 @@ inline void exchangeHalos(std::vector<ParticleDevice> &pds,
   // --- Phase 2: upload received halo to each GPU ---
   for (int g = 0; g < num_gpus; ++g) {
     const Domain &dom = doms[g];
-    cudaSetDevice(g);
+    cudaError_t err2 = cudaSetDevice(g);
+    if (err2 != cudaSuccess)
+      fprintf(stderr,
+              "CUDA error in exchangeHalos upload cudaSetDevice(%d): %s\n", g,
+              cudaGetErrorString(err2));
 
     // Reset halo count; owned count stays fixed
     pds[g].n_total = pds[g].n;

@@ -6,9 +6,10 @@ set(CMAKE_CXX_STANDARD 17)
 
 add_executable(md2d
     main.cu
+    check_cuda.h
     vec3.cuh
-    cells.cuh
     assign_cells.cuh
+    energy_diagnostics.cuh
     init_neighborhood.h
     particle_device.cuh
     particle_host.h

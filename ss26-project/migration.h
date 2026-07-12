@@ -5,6 +5,7 @@
 #include "particle_device.cuh"
 #include "particle_host.h"
 #include "vec3.cuh"
+#include <cstdio>
 #include <cuda_runtime.h>
 #include <vector>
 
@@ -25,7 +26,10 @@ inline void migrateParticles(std::vector<ParticleDevice> &pds,
   // Download owned particles from all GPUs
   std::vector<ParticleHost> hosts(num_gpus);
   for (int g = 0; g < num_gpus; ++g) {
-    cudaSetDevice(g);
+    cudaError_t err = cudaSetDevice(g);
+    if (err != cudaSuccess)
+      fprintf(stderr, "CUDA error in migrateParticles cudaSetDevice(%d): %s\n",
+              g, cudaGetErrorString(err));
     hosts[g].download(pds[g]);
   }
 
@@ -68,7 +72,12 @@ inline void migrateParticles(std::vector<ParticleDevice> &pds,
 
   // Re-upload to GPUs (free old arrays, allocate fresh)
   for (int g = 0; g < num_gpus; ++g) {
-    cudaSetDevice(g);
+    cudaError_t err = cudaSetDevice(g);
+    if (err != cudaSuccess)
+      fprintf(
+          stderr,
+          "CUDA error in migrateParticles re-upload cudaSetDevice(%d): %s\n", g,
+          cudaGetErrorString(err));
     freeParticleDevice(pds[g]);
     new_hosts[g].upload(pds[g], doms[g].total_cells, total_n);
   }

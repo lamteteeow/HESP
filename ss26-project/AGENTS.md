@@ -32,9 +32,10 @@ For 2D, `num_cells.z = 1` and all z-coordinates are clamped to 0. Extension to 3
 | `integration.cuh` | `integrate` kernel (symplectic Euler, reflective walls) |
 | `assign_cells.cuh` | `assignCell` kernel + `computeCellIndex` (from mini-project) |
 | `init_neighborhood.h` | `initCellNeighborhood()` — CPU-side 27-neighbor table (from mini-project) |
-| `cells.cuh` | `Cells` helper struct (from mini-project) |
+| `energy_diagnostics.cuh` | `computeEnergyAndMomentum` kernel — block-level reduction for KE + momentum |
+| `check_cuda.h` | `CHECK_CUDA` / `CHECK_LAST_CUDA` error-checking macros |
 | `vec3.cuh` | `Vec3` math type + free functions (from mini-project) |
-| `vtk_output.h` | `writeParticlesVTK()` — positions, velocities, radii |
+| `vtk_output.h` | `writeParticlesVTK()` — positions, velocities, radii, gpu_id, halo_blend |
 | `input.h` | `loadScene()` / `splitAt()` — JSON parsing |
 | `json.hpp` | nlohmann/json single-header (from mini-project) |
 | `scenes/two_discs.json` | Two particles colliding at the domain boundary |
@@ -67,7 +68,7 @@ Usage: `./build/md2d <scene.json> [max_steps] [num_gpus]`
 - `max_steps` defaults to 100000
 - `num_gpus` defaults to all available CUDA devices
 
-Output goes to `out_vtk_<scene>_<steps>/`. Open in ParaView; use "Glyph" filter with sphere glyph scaled by the `radius` scalar.
+Output goes to `output/out_vtk_<scene>_<steps>/` at the project root. Open in ParaView; use "Glyph" filter with sphere glyph scaled by the `radius` scalar. Color by `gpu_id` to see GPU ownership or by `halo_blend` to see domain-boundary gradients.
 
 ## JSON scene format
 
@@ -120,7 +121,7 @@ Output goes to `out_vtk_<scene>_<steps>/`. Open in ParaView; use "Glyph" filter 
 | Host vectors prefix | (none) or `h_` in halo exchange | `positions`, `h_pos` |
 
 ### Inconsistencies to fix
-- `vec3.cuh` includes `json.hpp` (~25k lines) for a single `__host__`-only function (`vec3FromJson`). This increases compile times for every translation unit that includes `vec3.cuh`. Move `vec3FromJson` to a host-only header or `input.h`.
+- ~~`vec3.cuh` includes `json.hpp`~~ ✅ FIXED — `vec3FromJson` moved to `input.h`.
 
 ---
 
@@ -230,22 +231,20 @@ module load cuda
 - `halo_exchange.h` + `migration.h`: Both use full CPU round-trips for particle data movement — this is the dominant bottleneck. **Particle packing** (GPU-side filtering via stream compaction into contiguous output buffers) and **particle unpacking** (receiving directly via `cudaMemcpyPeer` instead of CPU staging) are the two key techniques needed. See the dedicated task below.
 - `force_kernels.cuh`: uses particle `i`'s material properties only. Implement harmonic-mean effective `kn` and `gamma_n` for multi-material simulations.
 - No periodic boundary conditions in y. Currently reflective walls only.
-- No energy / momentum diagnostics. Add a reduction kernel to monitor conservation.
-- `main.cu`: the neighborhood table (`d_nb`) is rebuilt after migration even though the cell grid structure never changes. Cache it.
 
 ---
 
 ## Potential errors & code issues
 
 ### Critical / High severity
-1. **No CUDA error checking anywhere.** After every `cudaMalloc`, `cudaMemcpy`, and kernel launch, there is no `cudaGetLastError()` or `cudaDeviceSynchronize()` + error check. A silent failure on one GPU will produce garbage results with no diagnostic. Add `CHECK_CUDA(err)` macro after all CUDA API calls and kernel invocations.
+1. ~~**No CUDA error checking anywhere.**~~ ✅ FIXED — added `check_cuda.h` with `CHECK_CUDA` and `CHECK_LAST_CUDA` macros; wrapped all CUDA API calls and kernel launches in `main.cu`, `particle_host.h`, `halo_exchange.h`, and `migration.h`.
 
-2. **No peer access enabled.** The code never calls `cudaDeviceEnablePeerAccess()`. On A100 nodes (NVLink-connected), this is a missed optimization and could cause correctness issues if `cudaMemcpyPeer` is later introduced without enabling peer access first. Add peer access enable/disable at startup/cleanup.
+2. ~~**No peer access enabled.**~~ ✅ FIXED — `main.cu` now enables peer access between all GPU pairs at startup with graceful fallback if not supported.
 
-3. **`main.cu` — no error check on `cudaSetDevice`.** If device 0 or 1 is unavailable or in prohibited mode, subsequent operations silently operate on the wrong device or fail.
+3. ~~**`main.cu` — no error check on `cudaSetDevice`.**~~ ✅ FIXED — all `cudaSetDevice` calls are now wrapped with error checks.
 
 ### Medium severity
-4. **`vec3.cuh` includes `json.hpp`.** A math utility header pulls in the entire nlohmann/json library (~25k lines) for a single host-only function (`vec3FromJson`). This increases compile times for every translation unit that includes `vec3.cuh`. Move `vec3FromJson` to `input.h` or a dedicated utility header.
+4. ~~**`vec3.cuh` includes `json.hpp`.**~~ ✅ FIXED — moved `vec3FromJson` to `input.h`; `vec3.cuh` no longer depends on nlohmann/json.
 
 5. **`vec3::ceil()` uses `std::ceil`** which may not be available in device code on all CUDA toolkit versions (though it is supported since CUDA 10+). Use plain `ceilf()` for maximum portability.
 
@@ -270,7 +269,7 @@ module load cuda
 
 - [ ] **Lattice test**: generate a 20×20 hex lattice with `gen_lattice.py`, run for 10 000 steps, check VTK output in ParaView.
 
-- [ ] **Add CUDA error checking**: wrap all CUDA API calls and kernel launches with a `CHECK_CUDA` macro. This is the single most impactful reliability improvement.
+- [x] **Add CUDA error checking**: ✅ DONE — added `check_cuda.h` with `CHECK_CUDA` and `CHECK_LAST_CUDA` macros; all CUDA API calls and kernel launches are now checked.
 
 - [ ] **Periodic BCs in y**: replace the reflective y-walls with periodic boundaries. Requires wrapping positions and adjusting `computeCellIndex` (use `get_cell_index_for_periodic_boundary` already in `init_neighborhood.h`).
 
@@ -282,16 +281,16 @@ module load cuda
 
 - [ ] **Optimize migration**: replace `migrateParticles()` full round-trip with GPU-side stream compaction + `cudaMemcpyPeer`. Target: migration cost < halo exchange cost.
 
-- [ ] **Optimize halo exchange**: replace `collectHalo` CPU download with `cudaMemcpyPeer` (direct GPU-to-GPU). Enable peer access at startup with `cudaDeviceEnablePeerAccess`.
+- ~~**Optimize halo exchange**: replace `collectHalo` CPU download with `cudaMemcpyPeer` (direct GPU-to-GPU).~~ ✅ Peer access now enabled at startup with `cudaDeviceEnablePeerAccess`. Full GPU-to-GPU transfer still TODO.
 
 - [ ] **Extend to 3D**: remove `z=0` constraint in `integration.cuh`, set `num_cells.z > 1` in `buildDomains()`, update JSON scenes. No other file changes required.
 
 - [x] **Extend to N GPUs**: generalize `buildDomains()` to split the X axis into N equal slices, one per GPU. Each interior GPU then has two halo neighbors (left and right); adjust `exchangeHalos()` accordingly.
 
-- [ ] **Energy diagnostics**: add a device reduction (e.g., thrust::transform_reduce) to compute total kinetic energy each frame. Print it alongside the step count.
+- [x] **Energy diagnostics**: ✅ DONE — `energy_diagnostics.cuh` computes total kinetic energy and momentum per frame via block-level shared-memory reduction + atomicAdd.
 
 - [x] **Fix include guard in `assign_cells.cuh`**: rename `NEIGHBORHOOD_CUH` to `ASSIGN_CELLS_CUH`.
 
-- [ ] **Decouple `Vec3.cuh` from `json.hpp`**: move `Vec3FromJson` to a host-only header or `input.h`.
+- [x] **Decouple `Vec3.cuh` from `json.hpp`**: ✅ DONE — moved `vec3FromJson` to `input.h`.
 
 - [x] **Standardize naming conventions**: rename functions in `init_neighborhood.h` to camelCase; fix `numOfCellsPerAxis` parameter casing in `computeCellIndex`.

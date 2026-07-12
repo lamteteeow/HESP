@@ -4,7 +4,9 @@
 #include "particle_device.cuh"
 #include "vec3.cuh"
 #include <algorithm>
+#include <cstdio>
 #include <cuda_runtime.h>
+#include <stdexcept>
 #include <vector>
 
 // CPU-side particle buffer for one GPU's sub-domain.
@@ -67,32 +69,56 @@ struct ParticleHost {
     pd.n_total = n;
     pd.capacity = cap;
 
-    cudaMalloc(&pd.d_positions, cap * sizeof(Vec3));
-    cudaMalloc(&pd.d_velocities, cap * sizeof(Vec3));
-    cudaMalloc(&pd.d_masses, cap * sizeof(float));
-    cudaMalloc(&pd.d_radii, cap * sizeof(float));
-    cudaMalloc(&pd.d_kn, cap * sizeof(float));
-    cudaMalloc(&pd.d_gamma_n, cap * sizeof(float));
-    cudaMalloc(&pd.d_gamma_t, (cap / 2) * sizeof(float));
-    cudaMalloc(&pd.d_mu, (cap / 2) * sizeof(float));
-    cudaMalloc(&pd.d_forces, (cap / 2) * sizeof(Vec3));
-    cudaMalloc(&pd.d_cellHeads, total_cells * sizeof(int));
-    cudaMalloc(&pd.d_cellTails, cap * sizeof(int));
-    cudaMalloc(&pd.d_cellIndexes, cap * sizeof(int));
+    cudaError_t err;
+    auto check = [&](cudaError_t e, const char *name) {
+      if (e != cudaSuccess) {
+        fprintf(stderr, "CUDA error in ParticleHost::upload %s: %s\n", name,
+                cudaGetErrorString(e));
+        throw std::runtime_error(std::string("CUDA malloc failed: ") + name);
+      }
+    };
+    err = cudaMalloc(&pd.d_positions, cap * sizeof(Vec3));
+    check(err, "d_positions");
+    err = cudaMalloc(&pd.d_velocities, cap * sizeof(Vec3));
+    check(err, "d_velocities");
+    err = cudaMalloc(&pd.d_masses, cap * sizeof(float));
+    check(err, "d_masses");
+    err = cudaMalloc(&pd.d_radii, cap * sizeof(float));
+    check(err, "d_radii");
+    err = cudaMalloc(&pd.d_kn, cap * sizeof(float));
+    check(err, "d_kn");
+    err = cudaMalloc(&pd.d_gamma_n, cap * sizeof(float));
+    check(err, "d_gamma_n");
+    err = cudaMalloc(&pd.d_gamma_t, (cap / 2) * sizeof(float));
+    check(err, "d_gamma_t");
+    err = cudaMalloc(&pd.d_mu, (cap / 2) * sizeof(float));
+    check(err, "d_mu");
+    err = cudaMalloc(&pd.d_forces, (cap / 2) * sizeof(Vec3));
+    check(err, "d_forces");
+    err = cudaMalloc(&pd.d_cellHeads, total_cells * sizeof(int));
+    check(err, "d_cellHeads");
+    err = cudaMalloc(&pd.d_cellTails, cap * sizeof(int));
+    check(err, "d_cellTails");
+    err = cudaMalloc(&pd.d_cellIndexes, cap * sizeof(int));
+    check(err, "d_cellIndexes");
 
     if (n == 0)
       return;
-    auto cp = [](void *d, const void *h, size_t bytes) {
-      cudaMemcpy(d, h, bytes, cudaMemcpyHostToDevice);
+    auto cp = [](void *d, const void *h, size_t bytes, const char *name) {
+      cudaError_t e = cudaMemcpy(d, h, bytes, cudaMemcpyHostToDevice);
+      if (e != cudaSuccess) {
+        fprintf(stderr, "CUDA error in upload cudaMemcpy %s: %s\n", name,
+                cudaGetErrorString(e));
+      }
     };
-    cp(pd.d_positions, positions.data(), n * sizeof(Vec3));
-    cp(pd.d_velocities, velocities.data(), n * sizeof(Vec3));
-    cp(pd.d_masses, masses.data(), n * sizeof(float));
-    cp(pd.d_radii, radii.data(), n * sizeof(float));
-    cp(pd.d_kn, kn.data(), n * sizeof(float));
-    cp(pd.d_gamma_n, gamma_n.data(), n * sizeof(float));
-    cp(pd.d_gamma_t, gamma_t.data(), n * sizeof(float));
-    cp(pd.d_mu, mu.data(), n * sizeof(float));
+    cp(pd.d_positions, positions.data(), n * sizeof(Vec3), "d_positions");
+    cp(pd.d_velocities, velocities.data(), n * sizeof(Vec3), "d_velocities");
+    cp(pd.d_masses, masses.data(), n * sizeof(float), "d_masses");
+    cp(pd.d_radii, radii.data(), n * sizeof(float), "d_radii");
+    cp(pd.d_kn, kn.data(), n * sizeof(float), "d_kn");
+    cp(pd.d_gamma_n, gamma_n.data(), n * sizeof(float), "d_gamma_n");
+    cp(pd.d_gamma_t, gamma_t.data(), n * sizeof(float), "d_gamma_t");
+    cp(pd.d_mu, mu.data(), n * sizeof(float), "d_mu");
   }
 
   // Download owned particles (indices [0, pd.n)) from GPU.
@@ -109,46 +135,47 @@ struct ParticleHost {
     mu.resize(n);
     if (n == 0)
       return;
-    auto cp = [](void *h, const void *d, size_t bytes) {
-      cudaMemcpy(h, d, bytes, cudaMemcpyDeviceToHost);
+    auto cp = [](void *h, const void *d, size_t bytes, const char *name) {
+      cudaError_t e = cudaMemcpy(h, d, bytes, cudaMemcpyDeviceToHost);
+      if (e != cudaSuccess) {
+        fprintf(stderr, "CUDA error in download cudaMemcpy %s: %s\n", name,
+                cudaGetErrorString(e));
+      }
     };
-    cp(positions.data(), pd.d_positions, n * sizeof(Vec3));
-    cp(velocities.data(), pd.d_velocities, n * sizeof(Vec3));
-    cp(masses.data(), pd.d_masses, n * sizeof(float));
-    cp(radii.data(), pd.d_radii, n * sizeof(float));
-    cp(kn.data(), pd.d_kn, n * sizeof(float));
-    cp(gamma_n.data(), pd.d_gamma_n, n * sizeof(float));
-    cp(gamma_t.data(), pd.d_gamma_t, n * sizeof(float));
-    cp(mu.data(), pd.d_mu, n * sizeof(float));
+    cp(positions.data(), pd.d_positions, n * sizeof(Vec3), "d_positions");
+    cp(velocities.data(), pd.d_velocities, n * sizeof(Vec3), "d_velocities");
+    cp(masses.data(), pd.d_masses, n * sizeof(float), "d_masses");
+    cp(radii.data(), pd.d_radii, n * sizeof(float), "d_radii");
+    cp(kn.data(), pd.d_kn, n * sizeof(float), "d_kn");
+    cp(gamma_n.data(), pd.d_gamma_n, n * sizeof(float), "d_gamma_n");
+    cp(gamma_t.data(), pd.d_gamma_t, n * sizeof(float), "d_gamma_t");
+    cp(mu.data(), pd.d_mu, n * sizeof(float), "d_mu");
   }
 };
 
 // Free all device arrays in a ParticleDevice.
 inline void freeParticleDevice(ParticleDevice &pd) {
-  cudaFree(pd.d_positions);
-  pd.d_positions = nullptr;
-  cudaFree(pd.d_velocities);
-  pd.d_velocities = nullptr;
-  cudaFree(pd.d_masses);
-  pd.d_masses = nullptr;
-  cudaFree(pd.d_radii);
-  pd.d_radii = nullptr;
-  cudaFree(pd.d_kn);
-  pd.d_kn = nullptr;
-  cudaFree(pd.d_gamma_n);
-  pd.d_gamma_n = nullptr;
-  cudaFree(pd.d_gamma_t);
-  pd.d_gamma_t = nullptr;
-  cudaFree(pd.d_mu);
-  pd.d_mu = nullptr;
-  cudaFree(pd.d_forces);
-  pd.d_forces = nullptr;
-  cudaFree(pd.d_cellHeads);
-  pd.d_cellHeads = nullptr;
-  cudaFree(pd.d_cellTails);
-  pd.d_cellTails = nullptr;
-  cudaFree(pd.d_cellIndexes);
-  pd.d_cellIndexes = nullptr;
+  auto cf = [](void *&p, const char *name) {
+    if (p) {
+      cudaError_t e = cudaFree(p);
+      if (e != cudaSuccess)
+        fprintf(stderr, "CUDA error freeing %s: %s\n", name,
+                cudaGetErrorString(e));
+      p = nullptr;
+    }
+  };
+  cf(reinterpret_cast<void *&>(pd.d_positions), "d_positions");
+  cf(reinterpret_cast<void *&>(pd.d_velocities), "d_velocities");
+  cf(reinterpret_cast<void *&>(pd.d_masses), "d_masses");
+  cf(reinterpret_cast<void *&>(pd.d_radii), "d_radii");
+  cf(reinterpret_cast<void *&>(pd.d_kn), "d_kn");
+  cf(reinterpret_cast<void *&>(pd.d_gamma_n), "d_gamma_n");
+  cf(reinterpret_cast<void *&>(pd.d_gamma_t), "d_gamma_t");
+  cf(reinterpret_cast<void *&>(pd.d_mu), "d_mu");
+  cf(reinterpret_cast<void *&>(pd.d_forces), "d_forces");
+  cf(reinterpret_cast<void *&>(pd.d_cellHeads), "d_cellHeads");
+  cf(reinterpret_cast<void *&>(pd.d_cellTails), "d_cellTails");
+  cf(reinterpret_cast<void *&>(pd.d_cellIndexes), "d_cellIndexes");
   pd.n = pd.n_total = pd.capacity = 0;
 }
 

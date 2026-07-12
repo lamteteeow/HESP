@@ -2,12 +2,17 @@
 #define INPUT_H
 
 #include "domain.h"
-#include "vec3.cuh"
 #include "json.hpp"
+#include "vec3.cuh"
 #include <fstream>
 #include <stdexcept>
 #include <string>
 #include <vector>
+
+// Moved from vec3.cuh — host-only JSON parsing for Vec3.
+inline Vec3 vec3FromJson(const nlohmann::json &a) {
+  return Vec3{a[0].get<float>(), a[1].get<float>(), a[2].get<float>()};
+}
 
 struct SceneConfig {
   float dt;

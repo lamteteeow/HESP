@@ -6,8 +6,6 @@
 #define VEC3_CUH
 #include <math.h>
 
-#include "json.hpp"
-
 struct Vec3 {
   float x, y, z;
   __host__ __device__ Vec3() = default;
@@ -69,9 +67,6 @@ __host__ __device__ __forceinline__ Vec3 ceil(const Vec3 v) {
 }
 __host__ __device__ __forceinline__ int3 toInt3ceil(Vec3 v) {
   return {toInt3(ceil(v))};
-}
-__host__ __forceinline__ Vec3 vec3FromJson(const nlohmann::json &a) {
-  return Vec3{a[0].get<float>(), a[1].get<float>(), a[2].get<float>()};
 }
 
 __host__ __device__ __forceinline__ float dot(const Vec3 &lhs,
