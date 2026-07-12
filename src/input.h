@@ -4,6 +4,7 @@
 #include "domain.h"
 #include "json.hpp"
 #include "vec3.cuh"
+#include <cstdio>
 #include <fstream>
 #include <stdexcept>
 #include <string>
@@ -113,6 +114,8 @@ inline void splitIntoN(const ParticleData &src, const std::vector<Domain> &doms,
   out.resize(num_gpus);
   const Domain &d0 = doms[0];
   const int nx = d0.grid_nx, ny = d0.grid_ny, nz = d0.grid_nz;
+  printf("  splitIntoN: grid=%dx%dx%d  doms=%zu  particles=%zu\n",
+         nx, ny, nz, doms.size(), src.n);
   const float gmin_x = d0.global_min.x, gmin_y = d0.global_min.y, gmin_z = d0.global_min.z;
   const float gmax_x = d0.global_max.x, gmax_y = d0.global_max.y, gmax_z = d0.global_max.z;
   const float dx = (gmax_x - gmin_x) / nx;
@@ -130,6 +133,10 @@ inline void splitIntoN(const ParticleData &src, const std::vector<Domain> &doms,
                 src.radii[i], src.kn[i], src.gamma_n[i], src.gamma_t[i],
                 src.mu[i]);
   }
+  printf("  splitIntoN: per-gpu counts:");
+  for (int g = 0; g < num_gpus; ++g)
+    printf(" %d:%zu", g, out[g].n);
+  printf("\n");
 }
 
 #endif // INPUT_H
