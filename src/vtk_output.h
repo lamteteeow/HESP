@@ -69,9 +69,10 @@ inline void writeParticlesVTK(int frame, const std::vector<Vec3> &positions,
   f.close();
 }
 
-// Write domain boundaries as a wireframe box + GPU split lines.
-// Call once during the first frame — loaded alongside particle frames in
-// ParaView to show the simulation domain and GPU decomposition.
+// Write domain boundaries + halo regions as a wireframe + filled strips.
+// Call once during the first frame.
+// In ParaView, color by 'region_type' to distinguish:
+//   0 = domain boundary, 1 = owned split, 2 = halo strip
 inline void writeDomainBoundaryVTK(const Vec3 domain_min,
                                    const Vec3 domain_max,
                                    const std::vector<Domain> &doms,
@@ -86,97 +87,118 @@ inline void writeDomainBoundaryVTK(const Vec3 domain_min,
   if (!f)
     throw std::runtime_error("Failed to open domain boundary VTK file");
 
-  // z is 0 for 2D
-  float min_z = domain_min.z, max_z = domain_max.z;
-#ifdef MD3D
-  min_z = domain_min.z;
-  max_z = domain_max.z;
-#else
-  min_z = 0.0f;
-  max_z = 0.0f;
-#endif
+  // ---- Gather geometry ----
   const float min_x = domain_min.x, min_y = domain_min.y;
   const float max_x = domain_max.x, max_y = domain_max.y;
-
-  // Number of split lines: one vertical line at each GPU-owned boundary
-  const int num_gpus = static_cast<int>(doms.size());
-  const int num_split_lines = num_gpus - 1;
-
 #ifdef MD3D
-  // 8 corners for 3D box + 2 * num_split_lines for verticals
-  const int npts = 8 + 2 * num_split_lines;
-  const int nlines = 12 + num_split_lines;
-
-  f << "# vtk DataFile Version 3.0\n";
-  f << "Domain boundary\nASCII\nDATASET POLYDATA\n\n";
-
-  f << "POINTS " << npts << " float\n";
-  // 8 corners of the 3D box
-  f << min_x << " " << min_y << " " << min_z << "\n";  // 0
-  f << max_x << " " << min_y << " " << min_z << "\n";  // 1
-  f << max_x << " " << max_y << " " << min_z << "\n";  // 2
-  f << min_x << " " << max_y << " " << min_z << "\n";  // 3
-  f << min_x << " " << min_y << " " << max_z << "\n";  // 4
-  f << max_x << " " << min_y << " " << max_z << "\n";  // 5
-  f << max_x << " " << max_y << " " << max_z << "\n";  // 6
-  f << min_x << " " << max_y << " " << max_z << "\n";  // 7
-
-  // Vertical split lines (same as 2D, spanning full z)
-  int pi = 8;
-  for (int g = 0; g < num_gpus - 1; ++g) {
-    const float sx = doms[g].owned_max.x;
-    f << sx << " " << min_y << " " << min_z << "\n";
-    f << sx << " " << max_y << " " << max_z << "\n";
-  }
-
-  // 12 edges of the box + split lines
-  f << "\nLINES " << nlines << " " << (3 * 12 + 3 * num_split_lines) << "\n";
-  f << "2 0 1\n2 1 2\n2 2 3\n2 3 0\n";  // bottom face
-  f << "2 4 5\n2 5 6\n2 6 7\n2 7 4\n";  // top face
-  f << "2 0 4\n2 1 5\n2 2 6\n2 3 7\n";  // vertical edges
-
-  pi = 8;
-  for (int g = 0; g < num_gpus - 1; ++g) {
-    f << "2 " << pi << " " << (pi + 1) << "\n";
-    pi += 2;
-  }
-
+  const float min_z = domain_min.z, max_z = domain_max.z;
 #else
-  // 4 corners for 2D rectangle + 2 * num_split_lines for verticals
-  const int npts = 4 + 2 * num_split_lines;
-  const int nlines = 4 + num_split_lines;
+  const float min_z = 0.0f, max_z = 0.0f;
+#endif
+  const int num_gpus = static_cast<int>(doms.size());
 
+  // Build point list and cell lists
+  struct Pt { float x, y, z; };
+  std::vector<Pt> pts;
+  std::vector<std::vector<int>> lines;   // each = {2, i0, i1}
+  std::vector<std::vector<int>> polys;   // each = {4, i0, i1, i2, i3}
+  std::vector<int> line_types, poly_types;  // region_type per cell
+  auto addPt = [&](float x, float y, float z) {
+    pts.push_back({x, y, z});
+    return static_cast<int>(pts.size()) - 1;
+  };
+
+  // --- Outer domain box ---
+#ifdef MD3D
+  int b0 = addPt(min_x, min_y, min_z), b1 = addPt(max_x, min_y, min_z);
+  int b2 = addPt(max_x, max_y, min_z), b3 = addPt(min_x, max_y, min_z);
+  int t0 = addPt(min_x, min_y, max_z), t1 = addPt(max_x, min_y, max_z);
+  int t2 = addPt(max_x, max_y, max_z), t3 = addPt(min_x, max_y, max_z);
+  for (auto &l : std::vector<std::vector<int>>{
+           {b0,b1},{b1,b2},{b2,b3},{b3,b0},
+           {t0,t1},{t1,t2},{t2,t3},{t3,t0},
+           {b0,t0},{b1,t1},{b2,t2},{b3,t3}})
+    { lines.push_back({2, l[0], l[1]}); line_types.push_back(0); }
+#else
+  int bl = addPt(min_x, min_y, min_z), br = addPt(max_x, min_y, min_z);
+  int tr = addPt(max_x, max_y, min_z), tl = addPt(min_x, max_y, min_z);
+  for (auto &l : std::vector<std::vector<int>>{
+           {bl,br},{br,tr},{tr,tl},{tl,bl}})
+    { lines.push_back({2, l[0], l[1]}); line_types.push_back(0); }
+#endif
+
+  // --- Owned-region split lines ---
+  for (int g = 0; g < num_gpus - 1; ++g) {
+    float sx = doms[g].owned_max.x;
+    int b = addPt(sx, min_y, min_z), t = addPt(sx, max_y, max_z);
+    lines.push_back({2, b, t});
+    line_types.push_back(1);
+  }
+
+  // --- Halo strips (filled rectangles) ---
+  for (int g = 0; g < num_gpus; ++g) {
+    const Domain &d = doms[g];
+#ifdef MD3D
+    float lo_z = min_z, hi_z = max_z;
+#else
+    float lo_z = 0, hi_z = 0;
+#endif
+    // Left halo (has a left neighbor)
+    if (d.left_neighbor >= 0) {
+      int a = addPt(d.local_min.x, min_y, lo_z);
+      int b = addPt(d.owned_min.x, min_y, lo_z);
+      int c = addPt(d.owned_min.x, max_y, hi_z);
+      int d_ = addPt(d.local_min.x, max_y, hi_z);
+      polys.push_back({4, a, b, c, d_});
+      poly_types.push_back(2);
+    }
+    // Right halo (has a right neighbor)
+    if (d.right_neighbor >= 0) {
+      int a = addPt(d.owned_max.x, min_y, lo_z);
+      int b = addPt(d.local_max.x, min_y, lo_z);
+      int c = addPt(d.local_max.x, max_y, hi_z);
+      int d_ = addPt(d.owned_max.x, max_y, hi_z);
+      polys.push_back({4, a, b, c, d_});
+      poly_types.push_back(2);
+    }
+  }
+
+  // ---- Write VTK ----
   f << "# vtk DataFile Version 3.0\n";
   f << "Domain boundary\nASCII\nDATASET POLYDATA\n\n";
 
-  f << "POINTS " << npts << " float\n";
-  // Outer box corners
-  f << min_x << " " << min_y << " " << min_z << "\n";  // 0: bottom-left
-  f << max_x << " " << min_y << " " << min_z << "\n";  // 1: bottom-right
-  f << max_x << " " << max_y << " " << min_z << "\n";  // 2: top-right
-  f << min_x << " " << max_y << " " << min_z << "\n";  // 3: top-left
+  f << "POINTS " << pts.size() << " float\n";
+  for (auto &p : pts)
+    f << p.x << " " << p.y << " " << p.z << "\n";
 
-  // Vertical split lines at owned_max.x for each GPU (except last)
-  int pi = 4;
-  for (int g = 0; g < num_gpus - 1; ++g) {
-    const float sx = doms[g].owned_max.x;
-    f << sx << " " << min_y << " " << min_z << "\n";  // bottom
-    f << sx << " " << max_y << " " << min_z << "\n";  // top
+  // Lines
+  int line_bytes = 0;
+  for (auto &l : lines) line_bytes += 1 + static_cast<int>(l.size());
+  f << "\nLINES " << lines.size() << " " << line_bytes << "\n";
+  for (auto &l : lines) {
+    f << l[0];
+    for (size_t i = 1; i < l.size(); ++i) f << " " << l[i];
+    f << "\n";
   }
 
-  // Each line entry: <npoints> <idx0> <idx1 ...>
-  f << "\nLINES " << nlines << " " << (3 * 4 + 3 * num_split_lines) << "\n";
-  f << "2 0 1\n";  // bottom
-  f << "2 1 2\n";  // right
-  f << "2 2 3\n";  // top
-  f << "2 3 0\n";  // left
-
-  pi = 4;
-  for (int g = 0; g < num_gpus - 1; ++g) {
-    f << "2 " << pi << " " << (pi + 1) << "\n";
-    pi += 2;
+  // Halo polygons
+  int poly_bytes = 0;
+  for (auto &p : polys) poly_bytes += 1 + static_cast<int>(p.size());
+  if (!polys.empty()) {
+    f << "\nPOLYGONS " << polys.size() << " " << poly_bytes << "\n";
+    for (auto &p : polys) {
+      f << p[0];
+      for (size_t i = 1; i < p.size(); ++i) f << " " << p[i];
+      f << "\n";
+    }
   }
-#endif
+
+  // Cell data: region_type
+  int ncell = static_cast<int>(lines.size() + polys.size());
+  f << "\nCELL_DATA " << ncell << "\n";
+  f << "SCALARS region_type int 1\nLOOKUP_TABLE default\n";
+  for (int t : line_types) f << t << "\n";
+  for (int t : poly_types) f << t << "\n";
 
   f.close();
 }
