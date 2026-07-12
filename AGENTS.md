@@ -45,6 +45,7 @@ For 2D, `num_cells.z = 1` and all z-coordinates are clamped to 0. Extension to 3
 | `scripts/sbatch_a100.sh` | Slurm batch script for A100 partition (2 GPUs) |
 | `scripts/sbatch_work.sh` | Slurm batch script for work partition (1 GPU) |
 | `Makefile` | Build system (`make` / `make clean`) |
+| `README.md` | Project overview and quick-start |
 
 ## Build
 
