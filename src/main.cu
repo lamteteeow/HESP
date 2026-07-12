@@ -57,7 +57,7 @@ int main(int argc, char **argv) {
     return 1;
   }
   const long max_steps = (argc > 2) ? std::stol(argv[2]) : 100000;
-  const int steps_per_frame = 10; // write VTK every N steps
+  const int steps_per_frame = 50; // write VTK every N steps
 
   try {
 
@@ -223,6 +223,31 @@ int main(int argc, char **argv) {
           vel.insert(vel.end(), h.velocities.begin(),
                      h.velocities.begin() + h.n);
           rad.insert(rad.end(), h.radii.begin(), h.radii.begin() + h.n);
+        }
+
+        // Stable sort by radius to prevent ParaView flicker across frames
+        {
+          std::vector<size_t> idx(pos.size());
+          for (size_t i = 0; i < idx.size(); ++i)
+            idx[i] = i;
+          std::sort(idx.begin(), idx.end(),
+                    [&](size_t a, size_t b) {
+                      if (rad[a] != rad[b])
+                        return rad[a] < rad[b];
+                      if (pos[a].x != pos[b].x)
+                        return pos[a].x < pos[b].x;
+                      return pos[a].y < pos[b].y;
+                    });
+          std::vector<Vec3> pos2(pos.size()), vel2(pos.size());
+          std::vector<float> rad2(pos.size());
+          for (size_t i = 0; i < idx.size(); ++i) {
+            pos2[i] = pos[idx[i]];
+            vel2[i] = vel[idx[i]];
+            rad2[i] = rad[idx[i]];
+          }
+          pos.swap(pos2);
+          vel.swap(vel2);
+          rad.swap(rad2);
         }
 
         writeParticlesVTK(frame, pos, vel, rad, scene, max_steps);
