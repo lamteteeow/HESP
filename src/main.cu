@@ -1,19 +1,22 @@
 #include <algorithm>
 #include <cuda_runtime.h>
 #include <iostream>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
-#include "domain.h"
-#include "particle_device.cuh"
-#include "particle_host.h"
 #include "assign_cells.cuh"
+#include "check_cuda.h"
+#include "domain.h"
+#include "energy_diagnostics.cuh"
 #include "force_kernels.cuh"
 #include "halo_exchange.h"
 #include "init_neighborhood.h"
 #include "input.h"
 #include "integration.cuh"
 #include "migration.h"
+#include "particle_device.cuh"
+#include "particle_host.h"
 #include "vtk_output.h"
 
 // Upload the cell neighborhood table for a domain to the given GPU.
@@ -22,9 +25,9 @@ static int *uploadNeighborhood(const Domain &dom) {
   std::vector<int> nb(dom.total_cells * 27, -1);
   initCellNeighborhood(dom.num_cells, nb);
   int *d_nb;
-  cudaMalloc(&d_nb, dom.total_cells * 27 * sizeof(int));
-  cudaMemcpy(d_nb, nb.data(), dom.total_cells * 27 * sizeof(int),
-             cudaMemcpyHostToDevice);
+  CHECK_CUDA(cudaMalloc(&d_nb, dom.total_cells * 27 * sizeof(int)));
+  CHECK_CUDA(cudaMemcpy(d_nb, nb.data(), dom.total_cells * 27 * sizeof(int),
+                        cudaMemcpyHostToDevice));
   return d_nb;
 }
 
@@ -56,163 +59,193 @@ int main(int argc, char **argv) {
   const long max_steps = (argc > 2) ? std::stol(argv[2]) : 100000;
   const int steps_per_frame = 10; // write VTK every N steps
 
-  // ------------------------------------------------------------------ //
-  // 1.  Load scene
-  // ------------------------------------------------------------------ //
-  SceneConfig cfg;
-  ParticleData global;
-  loadScene(argv[1], cfg, global);
-  printf("Loaded %zu particles  dt=%.2e  cell_size=%.3f\n", global.n, cfg.dt,
-         cfg.cell_size);
+  try {
 
-  // ------------------------------------------------------------------ //
-  // 2.  Determine GPU count
-  // ------------------------------------------------------------------ //
-  int device_count = 0;
-  cudaGetDeviceCount(&device_count);
-  if (device_count < 1) {
-    fprintf(stderr, "Error: no CUDA-capable GPUs found.\n");
-    return 1;
-  }
+    // ------------------------------------------------------------------ //
+    // 1.  Load scene
+    // ------------------------------------------------------------------ //
+    SceneConfig cfg;
+    ParticleData global;
+    loadScene(argv[1], cfg, global);
+    printf("Loaded %zu particles  dt=%.2e  cell_size=%.3f\n", global.n, cfg.dt,
+           cfg.cell_size);
 
-  int num_gpus = device_count;
-  if (argc > 3)
-    num_gpus = std::min(static_cast<int>(std::stol(argv[3])), device_count);
-  printf("Using %d of %d available GPUs\n", num_gpus, device_count);
-
-  // ------------------------------------------------------------------ //
-  // 3.  Build domain decomposition (N equal X-slices)
-  // ------------------------------------------------------------------ //
-  const float max_r =
-      *std::max_element(global.radii.begin(), global.radii.end());
-  const float halo_w = 2.0f * max_r; // capture all contacts across boundaries
-  const float cell_size = cfg.cell_size > 0.0f ? cfg.cell_size : halo_w;
-
-  std::vector<Domain> doms =
-      buildDomains(cfg.domain_min, cfg.domain_max, halo_w, cell_size, num_gpus);
-
-  printf("Domain split into %d slices (halo_width=%.3f):\n", num_gpus, halo_w);
-  for (int g = 0; g < num_gpus; ++g) {
-    const Domain &d = doms[g];
-    printf("  GPU%d: cells %dx%d  owned [%.2f, %.2f]  local [%.2f, %.2f]"
-           "  neighbors: L=%d R=%d\n",
-           g, d.num_cells.x, d.num_cells.y, d.owned_min.x, d.owned_max.x,
-           d.local_min.x, d.local_max.x, d.left_neighbor, d.right_neighbor);
-  }
-
-  // ------------------------------------------------------------------ //
-  // 4.  Distribute particles and upload to GPUs
-  // ------------------------------------------------------------------ //
-  std::vector<ParticleData> per_gpu;
-  splitIntoN(global, doms, per_gpu);
-
-  std::vector<ParticleDevice> pds(num_gpus);
-  for (int g = 0; g < num_gpus; ++g) {
-    ParticleHost h = toHost(per_gpu[g]);
-    cudaSetDevice(g);
-    h.upload(pds[g], doms[g].total_cells, global.n);
-    printf("  GPU%d: %zu owned particles uploaded\n", g, pds[g].n);
-  }
-
-  // ------------------------------------------------------------------ //
-  // 5.  Build cell neighbor tables (fixed for the lifetime of the run)
-  // ------------------------------------------------------------------ //
-  std::vector<int *> d_nb(num_gpus, nullptr);
-  for (int g = 0; g < num_gpus; ++g) {
-    cudaSetDevice(g);
-    d_nb[g] = uploadNeighborhood(doms[g]);
-  }
-
-  // ------------------------------------------------------------------ //
-  // 6.  Main simulation loop
-  // ------------------------------------------------------------------ //
-  constexpr dim3 BLOCK(256);
-  const std::string scene = sceneName(argv[1]);
-  int frame = 0;
-
-  for (long step = 0; step < max_steps; ++step) {
-
-    // --- Halo exchange: populate ghost particles on each GPU ---
-    exchangeHalos(pds, doms);
-
-    // --- Assign cells (owned + halo) on each GPU ---
-    for (int g = 0; g < num_gpus; ++g) {
-      const Domain &dom = doms[g];
-      cudaSetDevice(g);
-      cudaMemset(pds[g].d_cellHeads, -1, dom.total_cells * sizeof(int));
-      if (pds[g].n_total > 0) {
-        dim3 grid((pds[g].n_total + BLOCK.x - 1) / BLOCK.x);
-        assignCell<<<grid, BLOCK>>>(pds[g].n_total, pds[g].d_positions,
-                                    dom.num_cells, dom.local_min, dom.cell_size,
-                                    pds[g].d_cellHeads, pds[g].d_cellTails,
-                                    pds[g].d_cellIndexes);
-      }
+    // ------------------------------------------------------------------ //
+    // 2.  Determine GPU count
+    // ------------------------------------------------------------------ //
+    int device_count = 0;
+    CHECK_CUDA(cudaGetDeviceCount(&device_count));
+    if (device_count < 1) {
+      fprintf(stderr, "Error: no CUDA-capable GPUs found.\n");
+      return 1;
     }
 
-    // --- Compute contact forces (owned particles only) ---
+    int num_gpus = device_count;
+    if (argc > 3)
+      num_gpus = std::min(static_cast<int>(std::stol(argv[3])), device_count);
+    printf("Using %d of %d available GPUs\n", num_gpus, device_count);
+
+    // ------------------------------------------------------------------ //
+    // 3.  Build domain decomposition (N equal X-slices)
+    // ------------------------------------------------------------------ //
+    const float max_r =
+        *std::max_element(global.radii.begin(), global.radii.end());
+    const float halo_w = 2.0f * max_r; // capture all contacts across boundaries
+    const float cell_size = cfg.cell_size > 0.0f ? cfg.cell_size : halo_w;
+
+    std::vector<Domain> doms = buildDomains(cfg.domain_min, cfg.domain_max,
+                                            halo_w, cell_size, num_gpus);
+
+    printf("Domain split into %d slices (halo_width=%.3f):\n", num_gpus,
+           halo_w);
     for (int g = 0; g < num_gpus; ++g) {
-      cudaSetDevice(g);
-      if (pds[g].n > 0) {
-        dim3 grid((pds[g].n + BLOCK.x - 1) / BLOCK.x);
-        computeContactForces<<<grid, BLOCK>>>(
-            pds[g].n, pds[g].n_total, pds[g].d_positions, pds[g].d_velocities,
-            pds[g].d_forces, pds[g].d_masses, pds[g].d_radii, pds[g].d_kn,
-            pds[g].d_gamma_n, pds[g].d_gamma_t, pds[g].d_mu, pds[g].d_cellHeads,
-            pds[g].d_cellTails, pds[g].d_cellIndexes, d_nb[g], cfg.gravity);
-      }
+      const Domain &d = doms[g];
+      printf("  GPU%d: cells %dx%d  owned [%.2f, %.2f]  local [%.2f, %.2f]"
+             "  neighbors: L=%d R=%d\n",
+             g, d.num_cells.x, d.num_cells.y, d.owned_min.x, d.owned_max.x,
+             d.local_min.x, d.local_max.x, d.left_neighbor, d.right_neighbor);
     }
 
-    // --- Integrate (owned particles only) ---
+    // ------------------------------------------------------------------ //
+    // 4.  Distribute particles and upload to GPUs
+    // ------------------------------------------------------------------ //
+    std::vector<ParticleData> per_gpu;
+    splitIntoN(global, doms, per_gpu);
+
+    std::vector<ParticleDevice> pds(num_gpus);
     for (int g = 0; g < num_gpus; ++g) {
-      cudaSetDevice(g);
-      if (pds[g].n > 0) {
-        dim3 grid((pds[g].n + BLOCK.x - 1) / BLOCK.x);
-        integrate<<<grid, BLOCK>>>(cfg.dt, pds[g].n, pds[g].d_positions,
-                                   pds[g].d_velocities, pds[g].d_forces,
-                                   pds[g].d_masses, pds[g].d_radii,
-                                   cfg.domain_min, cfg.domain_max);
-      }
+      ParticleHost h = toHost(per_gpu[g]);
+      CHECK_CUDA(cudaSetDevice(g));
+      h.upload(pds[g], doms[g].total_cells, global.n);
+      printf("  GPU%d: %zu owned particles uploaded\n", g, pds[g].n);
     }
 
-    // Synchronize all GPUs before migration / output
+    // ------------------------------------------------------------------ //
+    // 5.  Build cell neighbor tables (fixed for the lifetime of the run)
+    // ------------------------------------------------------------------ //
+    std::vector<int *> d_nb(num_gpus, nullptr);
     for (int g = 0; g < num_gpus; ++g) {
-      cudaSetDevice(g);
-      cudaDeviceSynchronize();
+      CHECK_CUDA(cudaSetDevice(g));
+      d_nb[g] = uploadNeighborhood(doms[g]);
     }
 
-    // --- Particle migration ---
-    migrateParticles(pds, doms, global.n);
+    // ------------------------------------------------------------------ //
+    // 6.  Main simulation loop
+    // ------------------------------------------------------------------ //
+    constexpr dim3 BLOCK(256);
+    const std::string scene = sceneName(argv[1]);
+    int frame = 0;
 
-    // --- VTK output ---
-    if (step % steps_per_frame == 0) {
-      std::vector<Vec3> pos, vel;
-      std::vector<float> rad;
+    for (long step = 0; step < max_steps; ++step) {
 
+      // --- Halo exchange: populate ghost particles on each GPU ---
+      exchangeHalos(pds, doms);
+
+      // --- Assign cells (owned + halo) on each GPU ---
       for (int g = 0; g < num_gpus; ++g) {
-        cudaSetDevice(g);
-        ParticleHost h;
-        h.download(pds[g]);
-        pos.insert(pos.end(), h.positions.begin(), h.positions.begin() + h.n);
-        vel.insert(vel.end(), h.velocities.begin(), h.velocities.begin() + h.n);
-        rad.insert(rad.end(), h.radii.begin(), h.radii.begin() + h.n);
+        const Domain &dom = doms[g];
+        CHECK_CUDA(cudaSetDevice(g));
+        CHECK_CUDA(
+            cudaMemset(pds[g].d_cellHeads, -1, dom.total_cells * sizeof(int)));
+        if (pds[g].n_total > 0) {
+          dim3 grid((pds[g].n_total + BLOCK.x - 1) / BLOCK.x);
+          assignCell<<<grid, BLOCK>>>(pds[g].n_total, pds[g].d_positions,
+                                      dom.num_cells, dom.local_min,
+                                      dom.cell_size, pds[g].d_cellHeads,
+                                      pds[g].d_cellTails, pds[g].d_cellIndexes);
+          CHECK_LAST_CUDA();
+        }
       }
 
-      writeParticlesVTK(frame++, pos, vel, rad, scene, max_steps);
+      // --- Compute contact forces (owned particles only) ---
+      for (int g = 0; g < num_gpus; ++g) {
+        CHECK_CUDA(cudaSetDevice(g));
+        if (pds[g].n > 0) {
+          dim3 grid((pds[g].n + BLOCK.x - 1) / BLOCK.x);
+          computeContactForces<<<grid, BLOCK>>>(
+              pds[g].n, pds[g].n_total, pds[g].d_positions, pds[g].d_velocities,
+              pds[g].d_forces, pds[g].d_masses, pds[g].d_radii, pds[g].d_kn,
+              pds[g].d_gamma_n, pds[g].d_gamma_t, pds[g].d_mu,
+              pds[g].d_cellHeads, pds[g].d_cellTails, pds[g].d_cellIndexes,
+              d_nb[g], cfg.gravity);
+          CHECK_LAST_CUDA();
+        }
+      }
 
-      printf("step %6ld  frame %4d", step, frame - 1);
-      for (int g = 0; g < num_gpus; ++g)
-        printf("  GPU%d:%zu", g, pds[g].n);
-      printf("\n");
+      // --- Integrate (owned particles only) ---
+      for (int g = 0; g < num_gpus; ++g) {
+        CHECK_CUDA(cudaSetDevice(g));
+        if (pds[g].n > 0) {
+          dim3 grid((pds[g].n + BLOCK.x - 1) / BLOCK.x);
+          integrate<<<grid, BLOCK>>>(cfg.dt, pds[g].n, pds[g].d_positions,
+                                     pds[g].d_velocities, pds[g].d_forces,
+                                     pds[g].d_masses, pds[g].d_radii,
+                                     cfg.domain_min, cfg.domain_max);
+          CHECK_LAST_CUDA();
+        }
+      }
+
+      // Synchronize all GPUs before migration / output
+      for (int g = 0; g < num_gpus; ++g) {
+        CHECK_CUDA(cudaSetDevice(g));
+        CHECK_CUDA(cudaDeviceSynchronize());
+      }
+
+      // --- Particle migration ---
+      migrateParticles(pds, doms, global.n);
+
+      // --- VTK output ---
+      if (step % steps_per_frame == 0) {
+        std::vector<Vec3> pos, vel;
+        std::vector<float> rad;
+
+        for (int g = 0; g < num_gpus; ++g) {
+          CHECK_CUDA(cudaSetDevice(g));
+          ParticleHost h;
+          h.download(pds[g]);
+          pos.insert(pos.end(), h.positions.begin(), h.positions.begin() + h.n);
+          vel.insert(vel.end(), h.velocities.begin(),
+                     h.velocities.begin() + h.n);
+          rad.insert(rad.end(), h.radii.begin(), h.radii.begin() + h.n);
+        }
+
+        writeParticlesVTK(frame++, pos, vel, rad, scene, max_steps);
+
+        // Accumulate energy diagnostics across all GPUs
+        float total_ke = 0, total_px = 0, total_py = 0, total_pz = 0;
+        for (int g = 0; g < num_gpus; ++g) {
+          CHECK_CUDA(cudaSetDevice(g));
+          if (pds[g].n > 0) {
+            dim3 grid((pds[g].n + BLOCK.x - 1) / BLOCK.x);
+            float g_ke, g_px, g_py, g_pz;
+            computeDiagnostics(pds[g], BLOCK, grid, g_ke, g_px, g_py, g_pz);
+            total_ke += g_ke;
+            total_px += g_px;
+            total_py += g_py;
+            total_pz += g_pz;
+          }
+        }
+
+        printf("step %6ld  frame %4d  KE=%.4e  P=(%.3e,%.3e,%.3e)", step,
+               frame - 1, total_ke, total_px, total_py, total_pz);
+        for (int g = 0; g < num_gpus; ++g)
+          printf("  GPU%d:%zu", g, pds[g].n);
+        printf("\n");
+      }
     }
-  }
 
-  // ------------------------------------------------------------------ //
-  // 7.  Cleanup
-  // ------------------------------------------------------------------ //
-  for (int g = 0; g < num_gpus; ++g) {
-    cudaSetDevice(g);
-    freeParticleDevice(pds[g]);
-    cudaFree(d_nb[g]);
+    // ------------------------------------------------------------------ //
+    // 7.  Cleanup
+    // ------------------------------------------------------------------ //
+    for (int g = 0; g < num_gpus; ++g) {
+      CHECK_CUDA(cudaSetDevice(g));
+      freeParticleDevice(pds[g]);
+      CHECK_CUDA(cudaFree(d_nb[g]));
+    }
+
+  } catch (const std::exception &e) {
+    fprintf(stderr, "Fatal error: %s\n", e.what());
+    return 1;
   }
 
   return 0;

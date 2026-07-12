@@ -35,8 +35,10 @@ For 2D, `num_cells.z = 1` and all z-coordinates are clamped to 0. Extension to 3
 | `cells.cuh` | `Cells` helper struct (from mini-project) |
 | `vec3.cuh` | `Vec3` math type + free functions (from mini-project) |
 | `vtk_output.h` | `writeParticlesVTK()` — positions, velocities, radii |
-| `input.h` | `loadScene()` / `splitAt()` — JSON parsing |
+| `input.h` | `loadScene()` / `splitAt()` / `splitIntoN()` — JSON parsing and particle distribution |
 | `json.hpp` | nlohmann/json single-header (from mini-project) |
+| `check_cuda.h` | `CHECK_CUDA` / `CHECK_LAST_CUDA` macros — CUDA error checking |
+| `energy_diagnostics.cuh` | `computeEnergyAndMomentum` kernel + `computeDiagnostics` helper — reduction for KE and momentum |
 | `scenes/two_discs.json` | Two particles colliding at the domain boundary |
 | `gen_lattice.py` | Python script: generates a 2D hexagonal lattice JSON scene |
 
@@ -230,7 +232,6 @@ module load cuda
 - `halo_exchange.h` + `migration.h`: Both use full CPU round-trips for particle data movement — this is the dominant bottleneck. **Particle packing** (GPU-side filtering via stream compaction into contiguous output buffers) and **particle unpacking** (receiving directly via `cudaMemcpyPeer` instead of CPU staging) are the two key techniques needed. See the dedicated task below.
 - `force_kernels.cuh`: uses particle `i`'s material properties only. Implement harmonic-mean effective `kn` and `gamma_n` for multi-material simulations.
 - No periodic boundary conditions in y. Currently reflective walls only.
-- No energy / momentum diagnostics. Add a reduction kernel to monitor conservation.
 - `main.cu`: the neighborhood table (`d_nb`) is rebuilt after migration even though the cell grid structure never changes. Cache it.
 
 ---
@@ -238,7 +239,7 @@ module load cuda
 ## Potential errors & code issues
 
 ### Critical / High severity
-1. **No CUDA error checking anywhere.** After every `cudaMalloc`, `cudaMemcpy`, and kernel launch, there is no `cudaGetLastError()` or `cudaDeviceSynchronize()` + error check. A silent failure on one GPU will produce garbage results with no diagnostic. Add `CHECK_CUDA(err)` macro after all CUDA API calls and kernel invocations.
+1. ~~**No CUDA error checking applied.**~~ Fixed: `check_cuda.h` macros now wrap all CUDA API calls and kernel launches in `main.cu`, `particle_host.h`, and `energy_diagnostics.cuh`.
 
 2. **No peer access enabled.** The code never calls `cudaDeviceEnablePeerAccess()`. On A100 nodes (NVLink-connected), this is a missed optimization and could cause correctness issues if `cudaMemcpyPeer` is later introduced without enabling peer access first. Add peer access enable/disable at startup/cleanup.
 
@@ -270,7 +271,7 @@ module load cuda
 
 - [ ] **Lattice test**: generate a 20×20 hex lattice with `gen_lattice.py`, run for 10 000 steps, check VTK output in ParaView.
 
-- [ ] **Add CUDA error checking**: wrap all CUDA API calls and kernel launches with a `CHECK_CUDA` macro. This is the single most impactful reliability improvement.
+- [x] **Integrate CUDA error checking**: `check_cuda.h` provides the macros — applied `CHECK_CUDA` / `CHECK_LAST_CUDA` to all CUDA API calls and kernel launches in `main.cu`, `particle_host.h`, and `energy_diagnostics.cuh`.
 
 - [ ] **Periodic BCs in y**: replace the reflective y-walls with periodic boundaries. Requires wrapping positions and adjusting `computeCellIndex` (use `get_cell_index_for_periodic_boundary` already in `init_neighborhood.h`).
 
@@ -288,7 +289,7 @@ module load cuda
 
 - [x] **Extend to N GPUs**: generalize `buildDomains()` to split the X axis into N equal slices, one per GPU. Each interior GPU then has two halo neighbors (left and right); adjust `exchangeHalos()` accordingly.
 
-- [ ] **Energy diagnostics**: add a device reduction (e.g., thrust::transform_reduce) to compute total kinetic energy each frame. Print it alongside the step count.
+- [x] **Energy diagnostics**: `energy_diagnostics.cuh` provides the reduction kernel and helper. Wired into the simulation loop — KE and momentum are printed each frame.
 
 - [x] **Fix include guard in `assign_cells.cuh`**: rename `NEIGHBORHOOD_CUH` to `ASSIGN_CELLS_CUH`.
 

@@ -1,6 +1,7 @@
 #ifndef ENERGY_DIAGNOSTICS_CUH
 #define ENERGY_DIAGNOSTICS_CUH
 
+#include "check_cuda.h"
 #include "particle_device.cuh"
 #include "vec3.cuh"
 #include <cuda_runtime.h>
@@ -67,16 +68,17 @@ inline void computeDiagnostics(const ParticleDevice &pd, const dim3 &block,
                                const dim3 &grid, float &ke, float &px,
                                float &py, float &pz) {
   float *d_accum = nullptr;
-  cudaMalloc(&d_accum, 4 * sizeof(float));
-  cudaMemset(d_accum, 0, 4 * sizeof(float));
+  CHECK_CUDA(cudaMalloc(&d_accum, 4 * sizeof(float)));
+  CHECK_CUDA(cudaMemset(d_accum, 0, 4 * sizeof(float)));
 
   const size_t shm_bytes = block.x * 4 * sizeof(float); // 4 values per thread
   computeEnergyAndMomentum<<<grid, block, shm_bytes>>>(pd.n, pd.d_velocities,
                                                        pd.d_masses, d_accum);
+  CHECK_LAST_CUDA();
 
   float h[4] = {};
-  cudaMemcpy(h, d_accum, 4 * sizeof(float), cudaMemcpyDeviceToHost);
-  cudaFree(d_accum);
+  CHECK_CUDA(cudaMemcpy(h, d_accum, 4 * sizeof(float), cudaMemcpyDeviceToHost));
+  CHECK_CUDA(cudaFree(d_accum));
   ke = h[0];
   px = h[1];
   py = h[2];

@@ -1,6 +1,7 @@
 #ifndef PARTICLE_HOST_H
 #define PARTICLE_HOST_H
 
+#include "check_cuda.h"
 #include "particle_device.cuh"
 #include "vec3.cuh"
 #include <algorithm>
@@ -67,23 +68,23 @@ struct ParticleHost {
     pd.n_total = n;
     pd.capacity = cap;
 
-    cudaMalloc(&pd.d_positions, cap * sizeof(Vec3));
-    cudaMalloc(&pd.d_velocities, cap * sizeof(Vec3));
-    cudaMalloc(&pd.d_masses, cap * sizeof(float));
-    cudaMalloc(&pd.d_radii, cap * sizeof(float));
-    cudaMalloc(&pd.d_kn, cap * sizeof(float));
-    cudaMalloc(&pd.d_gamma_n, cap * sizeof(float));
-    cudaMalloc(&pd.d_gamma_t, (cap / 2) * sizeof(float));
-    cudaMalloc(&pd.d_mu, (cap / 2) * sizeof(float));
-    cudaMalloc(&pd.d_forces, (cap / 2) * sizeof(Vec3));
-    cudaMalloc(&pd.d_cellHeads, total_cells * sizeof(int));
-    cudaMalloc(&pd.d_cellTails, cap * sizeof(int));
-    cudaMalloc(&pd.d_cellIndexes, cap * sizeof(int));
+    CHECK_CUDA(cudaMalloc(&pd.d_positions, cap * sizeof(Vec3)));
+    CHECK_CUDA(cudaMalloc(&pd.d_velocities, cap * sizeof(Vec3)));
+    CHECK_CUDA(cudaMalloc(&pd.d_masses, cap * sizeof(float)));
+    CHECK_CUDA(cudaMalloc(&pd.d_radii, cap * sizeof(float)));
+    CHECK_CUDA(cudaMalloc(&pd.d_kn, cap * sizeof(float)));
+    CHECK_CUDA(cudaMalloc(&pd.d_gamma_n, cap * sizeof(float)));
+    CHECK_CUDA(cudaMalloc(&pd.d_gamma_t, (cap / 2) * sizeof(float)));
+    CHECK_CUDA(cudaMalloc(&pd.d_mu, (cap / 2) * sizeof(float)));
+    CHECK_CUDA(cudaMalloc(&pd.d_forces, (cap / 2) * sizeof(Vec3)));
+    CHECK_CUDA(cudaMalloc(&pd.d_cellHeads, total_cells * sizeof(int)));
+    CHECK_CUDA(cudaMalloc(&pd.d_cellTails, cap * sizeof(int)));
+    CHECK_CUDA(cudaMalloc(&pd.d_cellIndexes, cap * sizeof(int)));
 
     if (n == 0)
       return;
     auto cp = [](void *d, const void *h, size_t bytes) {
-      cudaMemcpy(d, h, bytes, cudaMemcpyHostToDevice);
+      CHECK_CUDA(cudaMemcpy(d, h, bytes, cudaMemcpyHostToDevice));
     };
     cp(pd.d_positions, positions.data(), n * sizeof(Vec3));
     cp(pd.d_velocities, velocities.data(), n * sizeof(Vec3));
@@ -110,7 +111,7 @@ struct ParticleHost {
     if (n == 0)
       return;
     auto cp = [](void *h, const void *d, size_t bytes) {
-      cudaMemcpy(h, d, bytes, cudaMemcpyDeviceToHost);
+      CHECK_CUDA(cudaMemcpy(h, d, bytes, cudaMemcpyDeviceToHost));
     };
     cp(positions.data(), pd.d_positions, n * sizeof(Vec3));
     cp(velocities.data(), pd.d_velocities, n * sizeof(Vec3));
@@ -125,29 +126,29 @@ struct ParticleHost {
 
 // Free all device arrays in a ParticleDevice.
 inline void freeParticleDevice(ParticleDevice &pd) {
-  cudaFree(pd.d_positions);
+  CHECK_CUDA(cudaFree(pd.d_positions));
   pd.d_positions = nullptr;
-  cudaFree(pd.d_velocities);
+  CHECK_CUDA(cudaFree(pd.d_velocities));
   pd.d_velocities = nullptr;
-  cudaFree(pd.d_masses);
+  CHECK_CUDA(cudaFree(pd.d_masses));
   pd.d_masses = nullptr;
-  cudaFree(pd.d_radii);
+  CHECK_CUDA(cudaFree(pd.d_radii));
   pd.d_radii = nullptr;
-  cudaFree(pd.d_kn);
+  CHECK_CUDA(cudaFree(pd.d_kn));
   pd.d_kn = nullptr;
-  cudaFree(pd.d_gamma_n);
+  CHECK_CUDA(cudaFree(pd.d_gamma_n));
   pd.d_gamma_n = nullptr;
-  cudaFree(pd.d_gamma_t);
+  CHECK_CUDA(cudaFree(pd.d_gamma_t));
   pd.d_gamma_t = nullptr;
-  cudaFree(pd.d_mu);
+  CHECK_CUDA(cudaFree(pd.d_mu));
   pd.d_mu = nullptr;
-  cudaFree(pd.d_forces);
+  CHECK_CUDA(cudaFree(pd.d_forces));
   pd.d_forces = nullptr;
-  cudaFree(pd.d_cellHeads);
+  CHECK_CUDA(cudaFree(pd.d_cellHeads));
   pd.d_cellHeads = nullptr;
-  cudaFree(pd.d_cellTails);
+  CHECK_CUDA(cudaFree(pd.d_cellTails));
   pd.d_cellTails = nullptr;
-  cudaFree(pd.d_cellIndexes);
+  CHECK_CUDA(cudaFree(pd.d_cellIndexes));
   pd.d_cellIndexes = nullptr;
   pd.n = pd.n_total = pd.capacity = 0;
 }
