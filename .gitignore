@@ -37,6 +37,7 @@ bld/
 *.exp
 *.exe
 md2d
+md3d
 include/
 
 # Visual Studio 2015/2017 cache/options directory

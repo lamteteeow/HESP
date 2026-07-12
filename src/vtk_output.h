@@ -173,7 +173,7 @@ inline void writeDomainBoundaryVTK(const Vec3 domain_min,
 
   // Lines
   int line_bytes = 0;
-  for (auto &l : lines) line_bytes += 1 + static_cast<int>(l.size());
+  for (auto &l : lines) line_bytes += static_cast<int>(l.size());
   f << "\nLINES " << lines.size() << " " << line_bytes << "\n";
   for (auto &l : lines) {
     f << l[0];
@@ -183,7 +183,7 @@ inline void writeDomainBoundaryVTK(const Vec3 domain_min,
 
   // Halo polygons
   int poly_bytes = 0;
-  for (auto &p : polys) poly_bytes += 1 + static_cast<int>(p.size());
+  for (auto &p : polys) poly_bytes += static_cast<int>(p.size());
   if (!polys.empty()) {
     f << "\nPOLYGONS " << polys.size() << " " << poly_bytes << "\n";
     for (auto &p : polys) {
