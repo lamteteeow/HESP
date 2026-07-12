@@ -106,25 +106,26 @@ inline void splitAt(const ParticleData &src, float split_x, ParticleData &left,
   }
 }
 
-// Split particles into N sets, one per domain, by x-coordinate.
+// Split particles into N sets, one per domain, by (x, y, z) position.
 inline void splitIntoN(const ParticleData &src, const std::vector<Domain> &doms,
                        std::vector<ParticleData> &out) {
   const int num_gpus = static_cast<int>(doms.size());
   out.resize(num_gpus);
   const Domain &d0 = doms[0];
-  const int nx = d0.grid_nx, ny = d0.grid_ny;
-  const float gmin_x = d0.global_min.x, gmin_y = d0.global_min.y;
-  const float gmax_x = d0.global_max.x, gmax_y = d0.global_max.y;
+  const int nx = d0.grid_nx, ny = d0.grid_ny, nz = d0.grid_nz;
+  const float gmin_x = d0.global_min.x, gmin_y = d0.global_min.y, gmin_z = d0.global_min.z;
+  const float gmax_x = d0.global_max.x, gmax_y = d0.global_max.y, gmax_z = d0.global_max.z;
   const float dx = (gmax_x - gmin_x) / nx;
   const float dy = (gmax_y - gmin_y) / ny;
+  const float dz = (gmax_z - gmin_z) / nz;
   for (size_t i = 0; i < src.n; ++i) {
     const float x = src.positions[i].x;
     const float y = src.positions[i].y;
-    int gx = static_cast<int>((x - gmin_x) / dx);
-    int gy = static_cast<int>((y - gmin_y) / dy);
-    gx = std::min(std::max(gx, 0), nx - 1);
-    gy = std::min(std::max(gy, 0), ny - 1);
-    int g = gy * nx + gx;
+    const float z = src.positions[i].z;
+    int gx = std::min(std::max(static_cast<int>((x - gmin_x) / dx), 0), nx - 1);
+    int gy = std::min(std::max(static_cast<int>((y - gmin_y) / dy), 0), ny - 1);
+    int gz = std::min(std::max(static_cast<int>((z - gmin_z) / dz), 0), nz - 1);
+    int g = (gz * ny + gy) * nx + gx;
     out[g].push(src.positions[i], src.velocities[i], src.masses[i],
                 src.radii[i], src.kn[i], src.gamma_n[i], src.gamma_t[i],
                 src.mu[i]);

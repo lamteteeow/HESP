@@ -134,22 +134,31 @@ inline void writeDomainBoundaryVTK(const Vec3 domain_min,
 #endif
 
   // --- Owned-region split lines (grid boundaries) ---
-  const int nx = doms[0].grid_nx, ny = doms[0].grid_ny;
+  const int nx = doms[0].grid_nx, ny = doms[0].grid_ny, nz = doms[0].grid_nz;
   const float dx = (max_x - min_x) / nx;
   const float dy = (max_y - min_y) / ny;
-  // X splits (vertical lines)
+  const float dz = (max_z - min_z) / nz;
+  // X splits
   for (int gx = 1; gx < nx; ++gx) {
     float sx = min_x + gx * dx;
     int b = addPt(sx, min_y, min_z), t = addPt(sx, max_y, max_z);
-    lines.push_back({2, b, t});
-    line_types.push_back(1);
+    lines.push_back({2, b, t}); line_types.push_back(1);
   }
-  // Y splits (horizontal lines)
+  // Y splits
   for (int gy = 1; gy < ny; ++gy) {
     float sy = min_y + gy * dy;
     int l = addPt(min_x, sy, min_z), r = addPt(max_x, sy, max_z);
-    lines.push_back({2, l, r});
-    line_types.push_back(1);
+    lines.push_back({2, l, r}); line_types.push_back(1);
+  }
+  // Z splits (only in 3D mode)
+  for (int gz = 1; gz < nz; ++gz) {
+    float sz = min_z + gz * dz;
+    int bl = addPt(min_x, min_y, sz), br = addPt(max_x, min_y, sz);
+    int tr = addPt(max_x, max_y, sz), tl = addPt(min_x, max_y, sz);
+    lines.push_back({2, bl, br}); line_types.push_back(1);
+    lines.push_back({2, br, tr}); line_types.push_back(1);
+    lines.push_back({2, tr, tl}); line_types.push_back(1);
+    lines.push_back({2, tl, bl}); line_types.push_back(1);
   }
 
   // --- Halo strips (filled 3D boxes, or 2D rectangles) ---

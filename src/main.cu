@@ -117,14 +117,15 @@ int main(int argc, char **argv) {
            halo_w);
     for (int g = 0; g < num_gpus; ++g) {
       const Domain &d = doms[g];
-      printf("  GPU%d: grid(%d,%d) cells %dx%d  owned [%.2f-%.2f, %.2f-%.2f]"
-             "  local [%.2f-%.2f, %.2f-%.2f]"
-             "  neighbors: L=%d R=%d B=%d T=%d\n",
-             g, d.grid_x, d.grid_y, d.num_cells.x, d.num_cells.y,
-             d.owned_min.x, d.owned_max.x, d.owned_min.y, d.owned_max.y,
-             d.local_min.x, d.local_max.x, d.local_min.y, d.local_max.y,
+      printf("  GPU%d: grid(%d,%d,%d) cells %dx%dx%d  owned [%.1f-%.1f, %.1f-%.1f, %.1f-%.1f]"
+             "  local [%.1f-%.1f, %.1f-%.1f, %.1f-%.1f]"
+             "  neighbors: L=%d R=%d B=%d T=%d Back=%d Front=%d\n",
+             g, d.grid_x, d.grid_y, d.grid_z, d.num_cells.x, d.num_cells.y, d.num_cells.z,
+             d.owned_min.x, d.owned_max.x, d.owned_min.y, d.owned_max.y, d.owned_min.z, d.owned_max.z,
+             d.local_min.x, d.local_max.x, d.local_min.y, d.local_max.y, d.local_min.z, d.local_max.z,
              d.left_neighbor, d.right_neighbor,
-             d.bottom_neighbor, d.top_neighbor);
+             d.bottom_neighbor, d.top_neighbor,
+             d.back_neighbor, d.front_neighbor);
     }
 
     // ------------------------------------------------------------------ //
@@ -266,18 +267,20 @@ int main(int argc, char **argv) {
         std::vector<float> border(pos.size(), 0.0f);
         for (size_t i = 0; i < pos.size(); ++i) {
           const Domain &d = doms[gpu_owner[i]];
-          const float x = pos[i].x, y = pos[i].y;
+          const float x = pos[i].x, y = pos[i].y, z = pos[i].z;
           auto f = [&](float coord, float own, bool check_lo) -> float {
             float dist = (check_lo ? (coord - own) : (own - coord))
                        / d.halo_width;
             return (dist >= 0 && dist < 1) ? 1.0f - dist : 0.0f;
           };
-          float bx = 0.0f, by = 0.0f;
+          float bx = 0.0f, by = 0.0f, bz = 0.0f;
           if (d.left_neighbor   >= 0) bx = std::max(bx, f(x, d.owned_min.x, true));
           if (d.right_neighbor  >= 0) bx = std::max(bx, f(x, d.owned_max.x, false));
           if (d.bottom_neighbor >= 0) by = std::max(by, f(y, d.owned_min.y, true));
           if (d.top_neighbor    >= 0) by = std::max(by, f(y, d.owned_max.y, false));
-          border[i] = std::max(bx, by);
+          if (d.back_neighbor   >= 0) bz = std::max(bz, f(z, d.owned_min.z, true));
+          if (d.front_neighbor  >= 0) bz = std::max(bz, f(z, d.owned_max.z, false));
+          border[i] = std::max({bx, by, bz});
         }
 
         writeParticlesVTK(frame, pos, vel, rad, gpu_owner, border, scene,
