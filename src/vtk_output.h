@@ -159,13 +159,13 @@ inline void writeDomainBoundaryVTK(const Vec3 domain_min,
     int p110 = addPt(x1, y1, z0), p010 = addPt(x0, y1, z0);
     int p001 = addPt(x0, y0, z1), p101 = addPt(x1, y0, z1);
     int p111 = addPt(x1, y1, z1), p011 = addPt(x0, y1, z1);
-    // 6 faces (counter-clockwise from outside)
-    polys.push_back({4, p000, p100, p110, p010}); // bottom
-    polys.push_back({4, p001, p011, p111, p101}); // top
-    polys.push_back({4, p000, p010, p011, p001}); // left
-    polys.push_back({4, p100, p101, p111, p110}); // right
-    polys.push_back({4, p000, p001, p101, p100}); // front
-    polys.push_back({4, p010, p110, p111, p011}); // back
+    // 6 faces (vertex order: counter-clockwise viewed from outside the box)
+    polys.push_back({4, p000, p100, p110, p010}); // bottom (-z)
+    polys.push_back({4, p001, p101, p111, p011}); // top    (+z)
+    polys.push_back({4, p000, p001, p011, p010}); // left   (-x)
+    polys.push_back({4, p100, p110, p111, p101}); // right  (+x)
+    polys.push_back({4, p000, p100, p101, p001}); // front  (-y)
+    polys.push_back({4, p010, p011, p111, p110}); // back   (+y)
     for (int k = 0; k < 6; ++k) poly_types.push_back(2);
   };
 

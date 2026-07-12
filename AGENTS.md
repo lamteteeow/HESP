@@ -124,7 +124,12 @@ Output goes to `output/<scene>_<steps>/`. Open in ParaView; use "Glyph" filter w
 4. Add a `Glyph` filter, set glyph type to `Sphere`, scale by the `radius` scalar.
    In the Glyph properties, set **Masking → Glyph Mode** to `All Points`
    to avoid radius interpolation artifacts.
-5. Click `Play` to animate.
+5. Color particles: in **Properties → Coloring** select `gpu_owner` to see
+   which GPU owns each particle, or `border` for the halo-overlap gradient.
+6. For the domain boundary: select `domain_boundary.vtk` in the pipeline,
+   set **Coloring** to `region_type` (0=boundary, 1=split, 2=halo), and
+   reduce **Opacity** to ~0.3 to see particles through the halo volumes.
+7. Click `Play` to animate.
 
 ## JSON scene format
 

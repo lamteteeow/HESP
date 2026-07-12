@@ -118,7 +118,10 @@ load them all as a ParaView time series.
    - `gpu_owner` — discrete per-GPU coloring
    - `border` — 0→1 gradient showing halo proximity at GPU boundaries
    - `velocity` — vector field for arrow/direction coloring
-6. Click `Play` to animate.
+6. For `domain_boundary.vtk`: set **Coloring** to `region_type`
+   (0=boundary, 1=split, 2=halo), reduce **Opacity** to ~0.3 to see
+   particles through the halo volumes.
+7. Click `Play` to animate.
 
 ### File map
 
