@@ -230,9 +230,8 @@ module load cuda
 ## Known issues / TODOs
 
 - `halo_exchange.h` + `migration.h`: Both use full CPU round-trips for particle data movement — this is the dominant bottleneck. **Particle packing** (GPU-side filtering via stream compaction into contiguous output buffers) and **particle unpacking** (receiving directly via `cudaMemcpyPeer` instead of CPU staging) are the two key techniques needed. See the dedicated task below.
-- `force_kernels.cuh`: uses particle `i`'s material properties only. Implement harmonic-mean effective `kn` and `gamma_n` for multi-material simulations.
 - No periodic boundary conditions in y. Currently reflective walls only.
-- `main.cu`: the neighborhood table (`d_nb`) is rebuilt after migration even though the cell grid structure never changes. Cache it.
+- `vec3::ceil()` uses `std::ceil` on older builds — already migrated to `ceilf()` for portable device code.
 
 ---
 
@@ -241,21 +240,21 @@ module load cuda
 ### Critical / High severity
 1. ~~**No CUDA error checking applied.**~~ Fixed: `check_cuda.h` macros now wrap all CUDA API calls and kernel launches in `main.cu`, `particle_host.h`, and `energy_diagnostics.cuh`.
 
-2. **No peer access enabled.** The code never calls `cudaDeviceEnablePeerAccess()`. On A100 nodes (NVLink-connected), this is a missed optimization and could cause correctness issues if `cudaMemcpyPeer` is later introduced without enabling peer access first. Add peer access enable/disable at startup/cleanup.
+2. ~~**No peer access enabled.**~~ Fixed: `cudaDeviceEnablePeerAccess()` called for all GPU pairs at startup.
 
-3. **`main.cu` — no error check on `cudaSetDevice`.** If device 0 or 1 is unavailable or in prohibited mode, subsequent operations silently operate on the wrong device or fail.
+3. ~~**`main.cu` — no error check on `cudaSetDevice`.**~~ Fixed: all `cudaSetDevice` calls wrapped with `CHECK_CUDA`.
 
 ### Medium severity
-4. **`vec3.cuh` includes `json.hpp`.** A math utility header pulls in the entire nlohmann/json library (~25k lines) for a single host-only function (`vec3FromJson`). This increases compile times for every translation unit that includes `vec3.cuh`. Move `vec3FromJson` to `input.h` or a dedicated utility header.
+4. ~~**`vec3.cuh` includes `json.hpp`.**~~ Fixed: `vec3FromJson` moved to `input.h`; `json.hpp` include removed from `vec3.cuh`.
 
-5. **`vec3::ceil()` uses `std::ceil`** which may not be available in device code on all CUDA toolkit versions (though it is supported since CUDA 10+). Use plain `ceilf()` for maximum portability.
+5. ~~**`vec3::ceil()` uses `std::ceil`**~~ Fixed: uses `ceilf()` for portable device code.
 
-7. **`computeContactForces` comment says `d_gamma_t`/`d_mu` are "size n/2"** but they are actually allocated as `capacity/2 = total_n` which is >= `n`. The comment is misleading — the actual allocation is correct but could confuse maintainers.
+7. ~~**`computeContactForces` comment says `d_gamma_t`/`d_mu` are "size n/2"**~~ Fixed: comment now says "capacity/2" to match actual allocation.
 
 ### Low severity
-8. **`assign_cells.cuh` includes `<cstdio>`** unnecessarily. Remove dead include.
+8. ~~**`assign_cells.cuh` includes `<cstdio>`**~~ Fixed: dead include removed.
 
-9. **Inconsistent naming in `init_neighborhood.h`**: function `initCellNeighborhood` (camelCase) calls `get_cell_index_for_fixed_boundary` (snake_case). Standardize.
+9. ~~**Inconsistent naming in `init_neighborhood.h`**~~ Fixed: all functions now use camelCase consistently.
 
 10. **`integration.cuh` `reflectWalls` function**: the reflective wall correction only checks against global domain boundaries. If a particle on GPU 0 is pushed past `split_x` by wall reflection, it will be caught by migration — correct, but the two-step reflection + migration is slightly less efficient than handling the wall at the halo boundary.
 
@@ -293,6 +292,6 @@ module load cuda
 
 - [x] **Fix include guard in `assign_cells.cuh`**: rename `NEIGHBORHOOD_CUH` to `ASSIGN_CELLS_CUH`.
 
-- [ ] **Decouple `Vec3.cuh` from `json.hpp`**: move `Vec3FromJson` to a host-only header or `input.h`.
+- [x] **Decouple `Vec3.cuh` from `json.hpp`**: move `Vec3FromJson` to a host-only header or `input.h`.
 
 - [x] **Standardize naming conventions**: rename functions in `init_neighborhood.h` to camelCase; fix `numOfCellsPerAxis` parameter casing in `computeCellIndex`.

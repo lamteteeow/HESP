@@ -85,6 +85,22 @@ int main(int argc, char **argv) {
       num_gpus = std::min(static_cast<int>(std::stol(argv[3])), device_count);
     printf("Using %d of %d available GPUs\n", num_gpus, device_count);
 
+    // Enable peer access between all GPU pairs (prerequisite for
+    // cudaMemcpyPeer). Not all pairs may support it; skip those that don't.
+    for (int i = 0; i < num_gpus; ++i) {
+      CHECK_CUDA(cudaSetDevice(i));
+      for (int j = 0; j < num_gpus; ++j) {
+        if (i == j)
+          continue;
+        int can_access = 0;
+        CHECK_CUDA(cudaDeviceCanAccessPeer(&can_access, i, j));
+        if (can_access) {
+          CHECK_CUDA(cudaDeviceEnablePeerAccess(j, 0));
+          printf("  Peer access enabled: GPU%d -> GPU%d\n", i, j);
+        }
+      }
+    }
+
     // ------------------------------------------------------------------ //
     // 3.  Build domain decomposition (N equal X-slices)
     // ------------------------------------------------------------------ //
