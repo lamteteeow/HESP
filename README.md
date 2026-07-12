@@ -27,9 +27,10 @@ make
 ./md3d scenes/cube8.json   5000  4     # 3D, auto-decomposes into 2×2 grid
 ```
 
-Usage: `./md2d <scene.json> [max_steps] [num_gpus]`
+Usage: `./md2d <scene.json> [max_steps] [num_gpus] [vtk_interval]`
 - `max_steps` defaults to 100000
 - `num_gpus` defaults to all available CUDA devices
+- `vtk_interval` defaults to 20 (write VTK every N steps; lower = more collision detail)
 
 ## Algorithm
 

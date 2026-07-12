@@ -104,9 +104,10 @@ python3 scripts/gen_random.py > scenes/random.json
 ./md2d scenes/random.json 50000
 ```
 
-Usage: `./md2d <scene.json> [max_steps] [num_gpus]`
+Usage: `./md2d <scene.json> [max_steps] [num_gpus] [vtk_interval]`
 - `max_steps` defaults to 100000
 - `num_gpus` defaults to all available CUDA devices
+- `vtk_interval` defaults to 20 (write VTK every N steps; lower = more collision detail)
 
 Output goes to `output/<scene>_<steps>/`. Open in ParaView; use "Glyph" filter with sphere glyph scaled by the `radius` scalar.
 
