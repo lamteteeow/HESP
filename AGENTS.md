@@ -8,15 +8,19 @@ The simulation domain is split evenly along the X axis into N slices, one per GP
 Each GPU owns particles in its slice and exchanges halo particles with its left
 and right neighbors. Interior GPUs have two halo neighbors; edge GPUs have one.
 
+In 3D mode (`make md3d`, `-DMD3D`), the domain is split into a **2D nx×ny grid**
+(factored from N GPUs). Each GPU has up to 4 neighbors (L/R/B/T). 2D mode uses
+X-only split.
+
 At each step:
-1. **Halo exchange** — each GPU sends boundary strips to left/right neighbors and receives their strips as ghost/read-only particles, so cross-boundary contacts are captured.
+1. **Halo exchange** — each GPU sends boundary strips (X and Y) to neighbors and receives their strips as ghost/read-only particles.
 2. **Cell assignment** — all particles (owned + halo) are inserted into a uniform cell grid local to each GPU.
 3. **Force computation** — spring-dashpot (DEM) contact forces, computed only for owned particles.
-4. **Integration** — symplectic Euler, z=0 constraint enforced, reflective wall BCs.
-5. **Particle migration** — particles that crossed their owning slice are redistributed across all GPUs.
-6. **VTK output** — every `steps_per_frame` steps, all GPUs dump to a single VTK file.
+4. **Integration** — symplectic Euler, z=0 constraint enforced in 2D, reflective wall BCs on all axes.
+5. **Particle migration** — particles that crossed their owning region are redistributed across the GPU grid.
+6. **VTK output** — every `steps_per_frame` steps, all GPUs dump to a single VTK file with `gpu_owner`, `border`, and domain decomposition visuals.
 
-For 2D, `num_cells.z = 1` and all z-coordinates are clamped to 0. Extension to 3D only requires removing the z-constraint and setting `num_cells.z > 1`.
+For 2D, `num_cells.z = 1` and all z-coordinates are clamped to 0. For 3D, compile with `-DMD3D` (via `make md3d`) to remove the z-constraint and auto-decompose into a 2D grid.
 
 ## File map
 
@@ -41,7 +45,8 @@ For 2D, `num_cells.z = 1` and all z-coordinates are clamped to 0. Extension to 3
 | `energy_diagnostics.cuh` | `computeEnergyAndMomentum` kernel + `computeDiagnostics` helper — reduction for KE and momentum |
 | `scenes/two_discs.json` | Two particles colliding at the domain boundary |
 | `scripts/gen_lattice.py` | Python script: generates a 2D hexagonal lattice JSON scene |
-| `scripts/gen_random.py` | Python script: generates a random particle scene (`python3 scripts/gen_random.py > scenes/random.json`) |
+| `scripts/gen_random.py` | Python script: generates a 2D random particle scene |
+| `scripts/gen_random3d.py` | Python script: generates a 3D random particle scene |
 | `scripts/sbatch_a100.sh` | Slurm batch script for A100 partition (2 GPUs) |
 | `scripts/sbatch_work.sh` | Slurm batch script for work partition (1 GPU) |
 | `Makefile` | Build system (`make` / `make clean`) |
@@ -140,8 +145,8 @@ Output goes to `output/<scene>_<steps>/`. Open in ParaView; use "Glyph" filter w
 
 - **Owned vs halo layout**: `d_positions[0..n)` = owned (read-write); `d_positions[n..n_total)` = halo (read-only after exchange). Both are passed to `assignCell` so the cell grid contains all particles. Only owned particles are force-computed and integrated.
 - **Capacity**: each GPU pre-allocates `2 * total_N` slots so the worst-case migration (all particles on one GPU) fits without reallocation.
-- **N-GPU halo exchange**: each GPU collects left-boundary and right-boundary strips independently, then uploads strips received from its left and right neighbors as halo. Edge GPUs exchange on one side only.
-- **N-GPU migration**: downloads all owned particles from all GPUs, merges, re-splits by x-coordinate across N domain slices, and re-uploads.
+- **N-GPU halo exchange**: each GPU collects boundary strips (X and Y) independently, then uploads strips received from neighbors as halo. Edge GPUs exchange on one side only. In 3D mode, exchanges in up to 4 directions.
+- **N-GPU migration**: downloads all owned particles from all GPUs, merges, re-splits across the 2D grid (X and Y), and re-uploads.
 - **Material properties**: force kernel uses particle `i`'s `kn`, `gamma_n`, `gamma_t`, `mu` for both sides of a contact — valid for uniform materials. For mixed materials, use effective (harmonic mean) values.
 - **Neighborhood table** (one `d_nb` per GPU): built once at startup per domain and never changes. Only `d_cellHeads` is reset each step.
 - **Migration cost**: current implementation downloads all owned particles from all GPUs every time any particle crosses a boundary. This is the dominant cost for high-migration scenarios.
