@@ -64,7 +64,7 @@ login node (`tinyx`) — build on a compute node, or from a job script.
 
 ```bash
 # Get a compute node first
-salloc.tinygpu --gres=gpu:1 --time=01:00:00
+salloc.tinygpu --gres=gpu:rtx3080:8 --time=01:00:00
 
 module load cuda/12.8.0
 

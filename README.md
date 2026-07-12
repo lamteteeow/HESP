@@ -15,7 +15,7 @@ make md2d         # 2D binary (z=0 enforced, X-only split)
 
 ```bash
 # Get a compute node
-salloc.tinygpu --gres=gpu:1 --time=01:00:00
+salloc.tinygpu --gres=gpu:rtx3080:8 --time=01:00:00
 
 # Load modules and build
 module load cuda/12.8.0
