@@ -150,6 +150,15 @@ int main(int argc, char **argv) {
     }
 
     // ------------------------------------------------------------------ //
+    // 4.5  Allocate GPU-side halo packing buffers (one per GPU)
+    // ------------------------------------------------------------------ //
+    std::vector<HaloPackBuf> halo_bufs(num_gpus);
+    for (int g = 0; g < num_gpus; ++g) {
+      CHECK_CUDA(cudaSetDevice(g));
+      allocHaloPackBuf(halo_bufs[g], global.n);
+    }
+
+    // ------------------------------------------------------------------ //
     // 5.  Build cell neighbor tables (fixed for the lifetime of the run)
     // ------------------------------------------------------------------ //
     std::vector<int *> d_nb(num_gpus, nullptr);
@@ -168,7 +177,7 @@ int main(int argc, char **argv) {
     for (long step = 0; step < max_steps; ++step) {
 
       // --- Halo exchange: populate ghost particles on each GPU ---
-      exchangeHalos(pds, doms);
+      exchangeHalos(pds, doms, halo_bufs, BLOCK);
 
       // --- Assign cells (owned + halo) on each GPU ---
       for (int g = 0; g < num_gpus; ++g) {
@@ -331,6 +340,7 @@ int main(int argc, char **argv) {
       CHECK_CUDA(cudaSetDevice(g));
       freeParticleDevice(pds[g]);
       CHECK_CUDA(cudaFree(d_nb[g]));
+      freeHaloPackBuf(halo_bufs[g]);
     }
 
   } catch (const std::exception &e) {
