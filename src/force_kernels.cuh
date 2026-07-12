@@ -22,16 +22,17 @@ __global__ inline void computeContactForces(
     const float *d_gamma_t, // capacity/2 — owned only
     const float *d_mu,      // capacity/2 — owned only
     const int *d_cellHeads, const int *d_cellTails, const int *d_cellIndexes,
-    const int *d_neighbors_of_cell, const Vec3 gravity) {
-  const size_t i = blockIdx.x * blockDim.x + threadIdx.x;
-  if (i >= n)
-    return;
+      const int *d_neighbors_of_cell, const Vec3 gravity,
+      int *d_contact_count) {
+    const size_t i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= n)
+      return;
 
-  const Vec3 pi = d_positions[i];
-  const Vec3 vi = d_velocities[i];
-  const float ri = d_radii[i];
+    const Vec3 pi = d_positions[i];
+    const Vec3 vi = d_velocities[i];
+    const float ri = d_radii[i];
 
-  Vec3 fi = gravity * d_masses[i]; // gravity body force
+    Vec3 fi = gravity * d_masses[i]; // gravity body force
 
   const int cell = d_cellIndexes[i];
   const int base = cell * 27;
@@ -53,6 +54,7 @@ __global__ inline void computeContactForces(
       const float overlap = (ri + d_radii[j]) - dist;
       if (overlap <= 0.0f)
         continue;
+      atomicAdd(d_contact_count, 1);
 
       // Effective material properties (harmonic mean for mixed materials)
       const float kn_j = d_kn[j];

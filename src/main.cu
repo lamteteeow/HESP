@@ -180,17 +180,25 @@ int main(int argc, char **argv) {
       }
 
       // --- Compute contact forces (owned particles only) ---
+      int step_contacts = 0;
       for (int g = 0; g < num_gpus; ++g) {
         CHECK_CUDA(cudaSetDevice(g));
         if (pds[g].n > 0) {
+          int *d_cnt = nullptr;
+          CHECK_CUDA(cudaMalloc(&d_cnt, sizeof(int)));
+          CHECK_CUDA(cudaMemset(d_cnt, 0, sizeof(int)));
           dim3 grid((pds[g].n + BLOCK.x - 1) / BLOCK.x);
           computeContactForces<<<grid, BLOCK>>>(
               pds[g].n, pds[g].n_total, pds[g].d_positions, pds[g].d_velocities,
               pds[g].d_forces, pds[g].d_masses, pds[g].d_radii, pds[g].d_kn,
               pds[g].d_gamma_n, pds[g].d_gamma_t, pds[g].d_mu,
               pds[g].d_cellHeads, pds[g].d_cellTails, pds[g].d_cellIndexes,
-              d_nb[g], cfg.gravity);
+              d_nb[g], cfg.gravity, d_cnt);
           CHECK_LAST_CUDA();
+          int cnt = 0;
+          CHECK_CUDA(cudaMemcpy(&cnt, d_cnt, sizeof(int), cudaMemcpyDeviceToHost));
+          CHECK_CUDA(cudaFree(d_cnt));
+          step_contacts += cnt;
         }
       }
 
@@ -298,8 +306,9 @@ int main(int argc, char **argv) {
           }
         }
 
-        printf("step %6ld  frame %4d  KE=%.4e  P=(%.3e,%.3e,%.3e)", step,
-               frame - 1, total_ke, total_px, total_py, total_pz);
+        printf("step %6ld  frame %4d  KE=%.4e  P=(%.3e,%.3e,%.3e)  contacts=%d",
+               step, frame - 1, total_ke, total_px, total_py, total_pz,
+               step_contacts);
         for (int g = 0; g < num_gpus; ++g)
           printf("  GPU%d:%zu", g, pds[g].n);
         printf("\n");
