@@ -40,36 +40,83 @@ For 2D, `num_cells.z = 1` and all z-coordinates are clamped to 0. Extension to 3
 | `check_cuda.h` | `CHECK_CUDA` / `CHECK_LAST_CUDA` macros — CUDA error checking |
 | `energy_diagnostics.cuh` | `computeEnergyAndMomentum` kernel + `computeDiagnostics` helper — reduction for KE and momentum |
 | `scenes/two_discs.json` | Two particles colliding at the domain boundary |
-| `gen_lattice.py` | Python script: generates a 2D hexagonal lattice JSON scene |
+| `scripts/gen_lattice.py` | Python script: generates a 2D hexagonal lattice JSON scene |
+| `scripts/gen_random.py` | Python script: generates a random particle scene (`python3 scripts/gen_random.py > scenes/random.json`) |
+| `scripts/sbatch_a100.sh` | Slurm batch script for A100 partition (2 GPUs) |
+| `scripts/sbatch_work.sh` | Slurm batch script for work partition (1 GPU) |
+| `Makefile` | Build system (`make` / `make clean`) |
 
 ## Build
 
+### Local / workstation (CUDA already in PATH)
+
 ```bash
-cmake -B build -S .
-cmake --build build
+make
 ```
 
-Binary: `build/md2d`
+### TinyGPU cluster
+
+The cluster uses Lmod environment modules. CUDA is **not** available on the
+login node (`tinyx`) — build on a compute node, or from a job script.
+
+```bash
+# Get a compute node first
+salloc.tinygpu --gres=gpu:1 --time=01:00:00
+
+# Load GCC first (CUDA 12.8 requires host compiler ≥ GCC 10)
+module load gcc/11.5.0
+module load cuda/12.8.0
+
+make
+```
+
+**Recommended module versions:**
+
+| Module | Version | Why |
+|---|---|---|
+| `cuda` | `12.8.0` | Latest toolkit — best nvcc optimizer, full sm_70–sm_86 support |
+| `gcc` | `11.5.0` | CUDA 12.8 requires host compiler ≥ GCC 10; 11.5 is the most compatible version on TinyGPU. **GCC 14 is not supported by CUDA 12.8.** |
+
+The project uses only core CUDA Runtime API calls (`cudaMalloc`, `cudaMemcpy`,
+`cudaSetDevice`, `cudaDeviceEnablePeerAccess`, etc.) — no cuBLAS, cuFFT, CUB,
+or Thrust. Any CUDA ≥ 11.0 would work, but 12.8.0 produces the best codegen
+for A100 (sm_80) and RTX 3080 (sm_86).
+
+Binary: `./md2d`
 
 ## Run
 
 ```bash
 # Uses all available GPUs by default
-./build/md2d scenes/two_discs.json 10000
+./md2d scenes/two_discs.json 10000
 
 # Explicitly request N GPUs (3rd argument)
-./build/md2d scenes/lattice.json 50000 4
+./md2d scenes/lattice.json 50000 4
 
 # Generate a lattice scene and run it
-python gen_lattice.py > scenes/lattice.json
-./build/md2d scenes/lattice.json 50000
+python3 scripts/gen_lattice.py > scenes/lattice.json
+./md2d scenes/lattice.json 50000
+
+# Generate a random scene and run it
+python3 scripts/gen_random.py > scenes/random.json
+./md2d scenes/random.json 50000
 ```
 
-Usage: `./build/md2d <scene.json> [max_steps] [num_gpus]`
+Usage: `./md2d <scene.json> [max_steps] [num_gpus]`
 - `max_steps` defaults to 100000
 - `num_gpus` defaults to all available CUDA devices
 
-Output goes to `out_vtk_<scene>_<steps>/`. Open in ParaView; use "Glyph" filter with sphere glyph scaled by the `radius` scalar.
+Output goes to `output/<scene>_<steps>/`. Open in ParaView; use "Glyph" filter with sphere glyph scaled by the `radius` scalar.
+
+### Visualization
+
+1. Download the `output/` directory to your local machine.
+2. Open ParaView, `File → Open` → select all VTK files in the output directory
+   (they load as a time series). Include `domain_boundary.vtk` to see the domain
+   wireframe.
+3. Click `Apply`.
+4. Add a `Glyph` filter, set glyph type to `Sphere`, scale by the `radius` scalar.
+5. Click `Play` to animate.
 
 ## JSON scene format
 
@@ -153,11 +200,8 @@ Output goes to `out_vtk_<scene>_<steps>/`. Open in ParaView; use "Glyph" filter 
 | RTX 2080 Ti | 7.5 | `-gencode arch=compute_75,code=sm_75` |
 | V100 | 7.0 | `-gencode arch=compute_70,code=sm_70` |
 
-Build a multi-architecture binary for TinyGPU:
-```bash
-# Add to CMakeLists.txt:
-set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -gencode arch=compute_70,code=sm_70 -gencode arch=compute_75,code=sm_75 -gencode arch=compute_80,code=sm_80 -gencode arch=compute_86,code=sm_86")
-```
+Multi-architecture support is already configured in the `Makefile` (all four archs
+are compiled into a single fat binary). No extra flags needed.
 
 ### CPU optimization flags (for host code)
 
@@ -187,22 +231,25 @@ squeue.tinygpu
 sinfo.tinygpu
 ```
 
-### Batch job script template for md2d (2 GPUs, A100 partition)
+### Batch job scripts
 
+Pre-built Slurm scripts are provided in `scripts/`:
+
+| Script | Partition | Default GPUs | Use case |
+|---|---|---|---|
+| `scripts/sbatch_a100.sh` | `a100` | 2× A100 | NVLink, best multi-GPU perf |
+| `scripts/sbatch_work.sh` | `work` | 1× (RTX 2080 Ti / 3080) | Quick tests, single GPU |
+
+Usage:
 ```bash
-#!/bin/bash -l
-#SBATCH --gres=gpu:a100:2
-#SBATCH --partition=a100
-#SBATCH --time=6:00:00
-#SBATCH --export=NONE
+# A100 partition, 2 GPUs, default scene
+sbatch.tinygpu scripts/sbatch_a100.sh
 
-unset SLURM_EXPORT_ENV
+# Custom scene, steps, and GPU count (override --gres on command line)
+sbatch.tinygpu --gres=gpu:a100:4 scripts/sbatch_a100.sh scenes/random20.json 100000 4
 
-# Load CUDA module if needed
-module load cuda
-
-# Run with the scene file passed as argument
-./build/md2d scenes/lattice.json 50000
+# Work partition, 1 GPU
+sbatch.tinygpu scripts/sbatch_work.sh scenes/two_discs.json 10000
 ```
 
 ### Requesting specific GPU types

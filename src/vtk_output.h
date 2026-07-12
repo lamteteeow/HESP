@@ -12,6 +12,7 @@
 
 // Write one VTK frame for a set of 2D particles.
 // ParaView can render these as spheres using the Radius scalar field.
+// Output goes to output/<scenario>_<steps>/
 inline void writeParticlesVTK(int frame, const std::vector<Vec3> &positions,
                               const std::vector<Vec3> &velocities,
                               const std::vector<float> &radii,
@@ -20,7 +21,7 @@ inline void writeParticlesVTK(int frame, const std::vector<Vec3> &positions,
   const size_t n = positions.size();
 
   const std::string dir_name =
-      "out_vtk_" + scenario + "_" + std::to_string(steps);
+      "output/" + scenario + "_" + std::to_string(steps);
   fs::create_directories(dir_name);
 
   std::ostringstream fname;
@@ -57,6 +58,47 @@ inline void writeParticlesVTK(int frame, const std::vector<Vec3> &positions,
   f << "SCALARS radius float 1\nLOOKUP_TABLE default\n";
   for (size_t i = 0; i < n; ++i)
     f << radii[i] << "\n";
+
+	  f.close();
+}
+
+// Write domain boundaries as a wireframe box (separate VTK file).
+// Call once during the first frame — loaded alongside particle frames in
+// ParaView to show the simulation domain.
+inline void writeDomainBoundaryVTK(const Vec3 domain_min,
+                                   const Vec3 domain_max,
+                                   const std::string &scenario, long steps) {
+  namespace fs = std::filesystem;
+
+  const std::string dir_name =
+      "output/" + scenario + "_" + std::to_string(steps);
+  fs::create_directories(dir_name);
+
+  std::ofstream f(dir_name + "/domain_boundary.vtk");
+  if (!f)
+    throw std::runtime_error("Failed to open domain boundary VTK file");
+
+  // z is 0 for 2D
+  const float z = 0.0f;
+  const float min_x = domain_min.x, min_y = domain_min.y;
+  const float max_x = domain_max.x, max_y = domain_max.y;
+
+  f << "# vtk DataFile Version 3.0\n";
+  f << "Domain boundary\nASCII\nDATASET POLYDATA\n\n";
+
+  // 4 corners of the 2D domain rectangle
+  f << "POINTS 4 float\n";
+  f << min_x << " " << min_y << " " << z << "\n";
+  f << max_x << " " << min_y << " " << z << "\n";
+  f << max_x << " " << max_y << " " << z << "\n";
+  f << min_x << " " << max_y << " " << z << "\n";
+
+  // 4 lines forming the rectangle
+  f << "\nLINES 4 12\n";
+  f << "2 0 1\n";
+  f << "2 1 2\n";
+  f << "2 2 3\n";
+  f << "2 3 0\n";
 
   f.close();
 }

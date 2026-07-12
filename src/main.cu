@@ -225,7 +225,14 @@ int main(int argc, char **argv) {
           rad.insert(rad.end(), h.radii.begin(), h.radii.begin() + h.n);
         }
 
-        writeParticlesVTK(frame++, pos, vel, rad, scene, max_steps);
+        writeParticlesVTK(frame, pos, vel, rad, scene, max_steps);
+
+        // Write domain boundary once (first frame only)
+        if (frame == 0)
+          writeDomainBoundaryVTK(cfg.domain_min, cfg.domain_max, scene,
+                                 max_steps);
+
+        ++frame;
 
         // Accumulate energy diagnostics across all GPUs
         float total_ke = 0, total_px = 0, total_py = 0, total_pz = 0;

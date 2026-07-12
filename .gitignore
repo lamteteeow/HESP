@@ -36,6 +36,7 @@ bld/
 *.lib
 *.exp
 *.exe
+md2d
 include/
 
 # Visual Studio 2015/2017 cache/options directory
@@ -417,6 +418,7 @@ FodyWeavers.xsd
 
 # Build output directories
 build/
+output/
 
 # Mini-project simulation output
-out_vtk_*/
+output/
