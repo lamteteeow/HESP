@@ -3,11 +3,11 @@
 
 import json, random, sys, math
 
-N       = 8
+N       = 16
 SEED    = 42
 DOMAIN  = [8.0, 8.0, 8.0]   # x, y, z
 DT      = 0.0002
-VEL_MAX = 4.0
+VEL_MAX = 8.0
 R_MIN   = 0.3
 R_MAX   = 0.5
 
