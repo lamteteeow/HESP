@@ -113,7 +113,13 @@ int main(int argc, char **argv) {
     std::vector<Domain> doms = buildDomains(cfg.domain_min, cfg.domain_max,
                                             halo_w, cell_size, num_gpus);
 
-    printf("Domain split into %d slices (halo_width=%.3f):\n", num_gpus,
+    printf("Domain split into %d%s grid: %dx%dx%d (halo_width=%.3f):\n",
+           num_gpus,
+#ifdef MD3D
+           "-GPU 3D", doms[0].grid_nx, doms[0].grid_ny, doms[0].grid_nz,
+#else
+           "-GPU 2D", doms[0].grid_nx, doms[0].grid_ny, doms[0].grid_nz,
+#endif
            halo_w);
     for (int g = 0; g < num_gpus; ++g) {
       const Domain &d = doms[g];
