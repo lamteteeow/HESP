@@ -29,17 +29,20 @@ make
 
 Batch submission:
 ```bash
-# A100 (2 GPUs, NVLink)
-sbatch.tinygpu scripts/sbatch_a100.sh scenes/cube256.json 50000 2
+# A100 (4 GPUs, NVLink)
+sbatch.tinygpu scripts/sbatch_a100.sh scenes/cube256.json 50000 4
 
-# Work partition (1 GPU, RTX 2080 Ti / 3080)
+# RTX 3080 (8 GPUs)
+sbatch.tinygpu --gres=gpu:rtx3080:8 scripts/sbatch_work.sh scenes/cube256.json 50000 8
+
+# Quick test (1 GPU)
 sbatch.tinygpu scripts/sbatch_work.sh scenes/cube8.json 5000
 ```
 
 ## Run
 
 ```bash
-./md2d scenes/cube256.json 5000 8 5   # scene, max steps, GPUs, VTK interval
+./md3d scenes/cube256.json 5000 8 5   # scene, max steps, GPUs, VTK interval
 ```
 
 ## Algorithm
