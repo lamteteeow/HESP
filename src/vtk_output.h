@@ -13,12 +13,14 @@
 
 // Write one VTK frame for a set of 2D particles.
 // ParaView can render these as spheres using the Radius scalar field.
-// gpu_owner is written as a scalar so you can color by GPU ownership.
+// gpu_owner: which GPU owns the particle (color by this for domain view).
+// border: 0 = interior, 1 = at halo edge (gradient at GPU boundaries).
 // Output goes to output/<scenario>_<steps>/
 inline void writeParticlesVTK(int frame, const std::vector<Vec3> &positions,
                               const std::vector<Vec3> &velocities,
                               const std::vector<float> &radii,
                               const std::vector<int> &gpu_owner,
+                              const std::vector<float> &border,
                               const std::string &scenario, long steps) {
   namespace fs = std::filesystem;
   const size_t n = positions.size();
@@ -65,6 +67,10 @@ inline void writeParticlesVTK(int frame, const std::vector<Vec3> &positions,
   f << "SCALARS gpu_owner int 1\nLOOKUP_TABLE default\n";
   for (size_t i = 0; i < n; ++i)
     f << gpu_owner[i] << "\n";
+
+  f << "SCALARS border float 1\nLOOKUP_TABLE default\n";
+  for (size_t i = 0; i < n; ++i)
+    f << border[i] << "\n";
 
   f.close();
 }

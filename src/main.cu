@@ -253,7 +253,26 @@ int main(int argc, char **argv) {
           reorder(gpu_owner);
         }
 
-        writeParticlesVTK(frame, pos, vel, rad, gpu_owner, scene, max_steps);
+        // Compute border fraction: 0 = interior, 1 = at halo edge
+        std::vector<float> border(pos.size(), 0.0f);
+        for (size_t i = 0; i < pos.size(); ++i) {
+          const Domain &d = doms[gpu_owner[i]];
+          const float x = pos[i].x, y = pos[i].y;
+          // Distance from each owned boundary, normalised to halo_width
+          auto edge = [&](float coord, float own_lo, float own_hi) -> float {
+            float d_lo = (coord - own_lo) / d.halo_width;
+            float d_hi = (own_hi - coord) / d.halo_width;
+            if (d_lo >= 0 && d_lo < 1) return 1.0f - d_lo;
+            if (d_hi >= 0 && d_hi < 1) return 1.0f - d_hi;
+            return 0.0f;
+          };
+          float bx = edge(x, d.owned_min.x, d.owned_max.x);
+          float by = edge(y, d.owned_min.y, d.owned_max.y);
+          border[i] = std::max(bx, by);
+        }
+
+        writeParticlesVTK(frame, pos, vel, rad, gpu_owner, border, scene,
+                          max_steps);
 
         // Write domain decomposition lines once (first frame only)
         if (frame == 0) {
