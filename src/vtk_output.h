@@ -152,7 +152,23 @@ inline void writeDomainBoundaryVTK(const Vec3 domain_min,
     line_types.push_back(1);
   }
 
-  // --- Halo strips (filled rectangles) ---
+  // --- Halo strips (filled 3D boxes, or 2D rectangles) ---
+  // Helper: add 8 corners of a box and return the 6 face quads
+  auto addBox = [&](float x0, float x1, float y0, float y1, float z0, float z1) {
+    int p000 = addPt(x0, y0, z0), p100 = addPt(x1, y0, z0);
+    int p110 = addPt(x1, y1, z0), p010 = addPt(x0, y1, z0);
+    int p001 = addPt(x0, y0, z1), p101 = addPt(x1, y0, z1);
+    int p111 = addPt(x1, y1, z1), p011 = addPt(x0, y1, z1);
+    // 6 faces (counter-clockwise from outside)
+    polys.push_back({4, p000, p100, p110, p010}); // bottom
+    polys.push_back({4, p001, p011, p111, p101}); // top
+    polys.push_back({4, p000, p010, p011, p001}); // left
+    polys.push_back({4, p100, p101, p111, p110}); // right
+    polys.push_back({4, p000, p001, p101, p100}); // front
+    polys.push_back({4, p010, p110, p111, p011}); // back
+    for (int k = 0; k < 6; ++k) poly_types.push_back(2);
+  };
+
   for (int g = 0; g < num_gpus; ++g) {
     const Domain &d = doms[g];
 #ifdef MD3D
@@ -160,42 +176,14 @@ inline void writeDomainBoundaryVTK(const Vec3 domain_min,
 #else
     float lo_z = 0, hi_z = 0;
 #endif
-    // Left halo
-    if (d.left_neighbor >= 0) {
-      int a = addPt(d.local_min.x, d.owned_min.y, lo_z);
-      int b = addPt(d.owned_min.x, d.owned_min.y, lo_z);
-      int c = addPt(d.owned_min.x, d.owned_max.y, hi_z);
-      int dd = addPt(d.local_min.x, d.owned_max.y, hi_z);
-      polys.push_back({4, a, b, c, dd});
-      poly_types.push_back(2);
-    }
-    // Right halo
-    if (d.right_neighbor >= 0) {
-      int a = addPt(d.owned_max.x, d.owned_min.y, lo_z);
-      int b = addPt(d.local_max.x, d.owned_min.y, lo_z);
-      int c = addPt(d.local_max.x, d.owned_max.y, hi_z);
-      int dd = addPt(d.owned_max.x, d.owned_max.y, hi_z);
-      polys.push_back({4, a, b, c, dd});
-      poly_types.push_back(2);
-    }
-    // Bottom halo
-    if (d.bottom_neighbor >= 0) {
-      int a = addPt(d.owned_min.x, d.local_min.y, lo_z);
-      int b = addPt(d.owned_max.x, d.local_min.y, lo_z);
-      int c = addPt(d.owned_max.x, d.owned_min.y, hi_z);
-      int dd = addPt(d.owned_min.x, d.owned_min.y, hi_z);
-      polys.push_back({4, a, b, c, dd});
-      poly_types.push_back(2);
-    }
-    // Top halo
-    if (d.top_neighbor >= 0) {
-      int a = addPt(d.owned_min.x, d.owned_max.y, lo_z);
-      int b = addPt(d.owned_max.x, d.owned_max.y, lo_z);
-      int c = addPt(d.owned_max.x, d.local_max.y, hi_z);
-      int dd = addPt(d.owned_min.x, d.local_max.y, hi_z);
-      polys.push_back({4, a, b, c, dd});
-      poly_types.push_back(2);
-    }
+    if (d.left_neighbor >= 0)
+      addBox(d.local_min.x, d.owned_min.x, d.owned_min.y, d.owned_max.y, lo_z, hi_z);
+    if (d.right_neighbor >= 0)
+      addBox(d.owned_max.x, d.local_max.x, d.owned_min.y, d.owned_max.y, lo_z, hi_z);
+    if (d.bottom_neighbor >= 0)
+      addBox(d.owned_min.x, d.owned_max.x, d.local_min.y, d.owned_min.y, lo_z, hi_z);
+    if (d.top_neighbor >= 0)
+      addBox(d.owned_min.x, d.owned_max.x, d.owned_max.y, d.local_max.y, lo_z, hi_z);
   }
 
   // ---- Write VTK ----
