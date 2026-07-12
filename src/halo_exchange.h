@@ -9,14 +9,13 @@
 
 // Download particles in a boundary strip from a GPU into host buffers.
 // strip_lo / strip_hi define the x-range of the strip to collect.
-// E.g.: for a right neighbor, collect [owned_max.x - halo_width, owned_max.x).
-//       for a left neighbor,  collect [owned_min.x, owned_min.x + halo_width).
-//
+// For Y halos: pass strip_lo/strip_hi as owned y-range, and filter on pos.y.
 // Call cudaSetDevice(dom.gpu_id) before this function.
 inline void collectHalo(const ParticleDevice &pd, float strip_lo,
                         float strip_hi, std::vector<Vec3> &h_pos,
                         std::vector<Vec3> &h_vel, std::vector<float> &h_rad,
-                        std::vector<float> &h_kn, std::vector<float> &h_gn) {
+                        std::vector<float> &h_kn, std::vector<float> &h_gn,
+                        bool filter_by_y = false) {
   const size_t n = pd.n;
   std::vector<Vec3> pos(n), vel(n);
   std::vector<float> rad(n), kn(n), gn(n);
@@ -30,15 +29,11 @@ inline void collectHalo(const ParticleDevice &pd, float strip_lo,
   cudaMemcpy(gn.data(), pd.d_gamma_n, n * sizeof(float),
              cudaMemcpyDeviceToHost);
 
-  h_pos.clear();
-  h_vel.clear();
-  h_rad.clear();
-  h_kn.clear();
-  h_gn.clear();
+  h_pos.clear(); h_vel.clear(); h_rad.clear(); h_kn.clear(); h_gn.clear();
 
   for (size_t i = 0; i < n; ++i) {
-    const float x = pos[i].x;
-    if (x >= strip_lo && x < strip_hi) {
+    float coord = filter_by_y ? pos[i].y : pos[i].x;
+    if (coord >= strip_lo && coord < strip_hi) {
       h_pos.push_back(pos[i]);
       h_vel.push_back(vel[i]);
       h_rad.push_back(rad[i]);
@@ -49,17 +44,14 @@ inline void collectHalo(const ParticleDevice &pd, float strip_lo,
 }
 
 // Upload halo particles to a GPU, appending them after existing particles.
-// Accumulates: pd.n_total += n_halo so multiple calls stack correctly.
-// Call cudaSetDevice(target gpu_id) before this function.
 inline void uploadHalo(ParticleDevice &pd, const std::vector<Vec3> &h_pos,
                        const std::vector<Vec3> &h_vel,
                        const std::vector<float> &h_rad,
                        const std::vector<float> &h_kn,
                        const std::vector<float> &h_gn) {
   const size_t nh = h_pos.size();
-  if (nh == 0)
-    return;
-  const size_t off = pd.n_total; // append after current end
+  if (nh == 0) return;
+  const size_t off = pd.n_total;
   pd.n_total += nh;
 
   cudaMemcpy(pd.d_positions + off, h_pos.data(), nh * sizeof(Vec3),
@@ -74,68 +66,76 @@ inline void uploadHalo(ParticleDevice &pd, const std::vector<Vec3> &h_pos,
              cudaMemcpyHostToDevice);
 }
 
-// Halo exchange across N GPU sub-domains split along the X axis.
-//
-// For each GPU:
-//   1. Collect particles in the right boundary strip → send to right neighbor.
-//   2. Collect particles in the left boundary strip  → send to left neighbor.
-//   3. Upload particles received from left neighbor (its right strip).
-//   4. Upload particles received from right neighbor (its left strip).
-//
-// The host acts as an intermediary (CPU-mediated exchange).
-// TODO: replace with cudaMemcpyPeer for direct GPU-to-GPU transfer.
+// Halo exchange across an nx × ny GPU grid.
+// Each GPU exchanges strips with up to 4 neighbors (left, right, bottom, top).
 inline void exchangeHalos(std::vector<ParticleDevice> &pds,
                           const std::vector<Domain> &doms) {
   const int num_gpus = static_cast<int>(pds.size());
 
-  // Per-GPU: halo strips to send to left/right neighbors.
-  // right_strip[g] = particles from GPU g destined for its right neighbor.
-  // left_strip[g]  = particles from GPU g destined for its left neighbor.
   struct HaloBuf {
     std::vector<Vec3> pos, vel;
     std::vector<float> rad, kn, gn;
   };
   std::vector<HaloBuf> right_strip(num_gpus), left_strip(num_gpus);
+  std::vector<HaloBuf> top_strip(num_gpus), bottom_strip(num_gpus);
 
-  // --- Phase 1: collect boundary strips from each GPU ---
+  // --- Phase 1: collect boundary strips ---
   for (int g = 0; g < num_gpus; ++g) {
     const Domain &dom = doms[g];
     cudaSetDevice(g);
 
-    // Collect strip for right neighbor (if any)
+    // X direction
     if (dom.right_neighbor >= 0) {
-      const float lo = dom.owned_max.x - dom.halo_width;
-      const float hi = dom.owned_max.x;
-      collectHalo(pds[g], lo, hi, right_strip[g].pos, right_strip[g].vel,
-                  right_strip[g].rad, right_strip[g].kn, right_strip[g].gn);
+      collectHalo(pds[g], dom.owned_max.x - dom.halo_width, dom.owned_max.x,
+                  right_strip[g].pos, right_strip[g].vel, right_strip[g].rad,
+                  right_strip[g].kn, right_strip[g].gn);
+    }
+    if (dom.left_neighbor >= 0) {
+      collectHalo(pds[g], dom.owned_min.x,
+                  dom.owned_min.x + dom.halo_width,
+                  left_strip[g].pos, left_strip[g].vel, left_strip[g].rad,
+                  left_strip[g].kn, left_strip[g].gn);
     }
 
-    // Collect strip for left neighbor (if any)
-    if (dom.left_neighbor >= 0) {
-      const float lo = dom.owned_min.x;
-      const float hi = dom.owned_min.x + dom.halo_width;
-      collectHalo(pds[g], lo, hi, left_strip[g].pos, left_strip[g].vel,
-                  left_strip[g].rad, left_strip[g].kn, left_strip[g].gn);
+    // Y direction (only meaningful in 3D multi-row grids)
+    if (dom.top_neighbor >= 0) {
+      collectHalo(pds[g], dom.owned_max.y - dom.halo_width, dom.owned_max.y,
+                  top_strip[g].pos, top_strip[g].vel, top_strip[g].rad,
+                  top_strip[g].kn, top_strip[g].gn, /*filter_by_y=*/true);
+    }
+    if (dom.bottom_neighbor >= 0) {
+      collectHalo(pds[g], dom.owned_min.y,
+                  dom.owned_min.y + dom.halo_width,
+                  bottom_strip[g].pos, bottom_strip[g].vel, bottom_strip[g].rad,
+                  bottom_strip[g].kn, bottom_strip[g].gn, /*filter_by_y=*/true);
     }
   }
 
-  // --- Phase 2: upload received halo to each GPU ---
+  // --- Phase 2: upload received halos ---
   for (int g = 0; g < num_gpus; ++g) {
     const Domain &dom = doms[g];
     cudaSetDevice(g);
 
-    // Reset halo count; owned count stays fixed
+    // Reset halo count
     pds[g].n_total = pds[g].n;
 
-    // Receive from left neighbor → its right_strip
+    // X neighbors
     if (dom.left_neighbor >= 0) {
       const HaloBuf &src = right_strip[dom.left_neighbor];
       uploadHalo(pds[g], src.pos, src.vel, src.rad, src.kn, src.gn);
     }
-
-    // Receive from right neighbor → its left_strip
     if (dom.right_neighbor >= 0) {
       const HaloBuf &src = left_strip[dom.right_neighbor];
+      uploadHalo(pds[g], src.pos, src.vel, src.rad, src.kn, src.gn);
+    }
+
+    // Y neighbors
+    if (dom.bottom_neighbor >= 0) {
+      const HaloBuf &src = top_strip[dom.bottom_neighbor];
+      uploadHalo(pds[g], src.pos, src.vel, src.rad, src.kn, src.gn);
+    }
+    if (dom.top_neighbor >= 0) {
+      const HaloBuf &src = bottom_strip[dom.top_neighbor];
       uploadHalo(pds[g], src.pos, src.vel, src.rad, src.kn, src.gn);
     }
   }

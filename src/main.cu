@@ -117,10 +117,14 @@ int main(int argc, char **argv) {
            halo_w);
     for (int g = 0; g < num_gpus; ++g) {
       const Domain &d = doms[g];
-      printf("  GPU%d: cells %dx%d  owned [%.2f, %.2f]  local [%.2f, %.2f]"
-             "  neighbors: L=%d R=%d\n",
-             g, d.num_cells.x, d.num_cells.y, d.owned_min.x, d.owned_max.x,
-             d.local_min.x, d.local_max.x, d.left_neighbor, d.right_neighbor);
+      printf("  GPU%d: grid(%d,%d) cells %dx%d  owned [%.2f-%.2f, %.2f-%.2f]"
+             "  local [%.2f-%.2f, %.2f-%.2f]"
+             "  neighbors: L=%d R=%d B=%d T=%d\n",
+             g, d.grid_x, d.grid_y, d.num_cells.x, d.num_cells.y,
+             d.owned_min.x, d.owned_max.x, d.owned_min.y, d.owned_max.y,
+             d.local_min.x, d.local_max.x, d.local_min.y, d.local_max.y,
+             d.left_neighbor, d.right_neighbor,
+             d.bottom_neighbor, d.top_neighbor);
     }
 
     // ------------------------------------------------------------------ //

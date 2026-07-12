@@ -29,13 +29,15 @@ inline void migrateParticles(std::vector<ParticleDevice> &pds,
     hosts[g].download(pds[g]);
   }
 
-  // Quick check: any particle that crossed out of its owning domain?
+  // Quick check: any particle crossed out of its owning domain?
   bool crossed = false;
   for (int g = 0; g < num_gpus && !crossed; ++g) {
     const Domain &dom = doms[g];
     for (size_t i = 0; i < hosts[g].n && !crossed; ++i) {
       const float x = hosts[g].positions[i].x;
-      if (x < dom.owned_min.x || x >= dom.owned_max.x)
+      const float y = hosts[g].positions[i].y;
+      if (x < dom.owned_min.x || x >= dom.owned_max.x ||
+          y < dom.owned_min.y || y >= dom.owned_max.y)
         crossed = true;
     }
   }
@@ -52,15 +54,23 @@ inline void migrateParticles(std::vector<ParticleDevice> &pds,
                   src.mu[i], src.ids[i]);
   }
 
-  // Re-split into N bins by x-coordinate
-  // Domain g owns particles with x in [owned_min.x, owned_max.x)
+  // Re-split into nx × ny grid by (x, y) position
+  const Domain &d0 = doms[0];
+  const int nx = d0.grid_nx, ny = d0.grid_ny;
+  const float gmin_x = d0.global_min.x, gmin_y = d0.global_min.y;
+  const float gmax_x = d0.global_max.x, gmax_y = d0.global_max.y;
+  const float dx = (gmax_x - gmin_x) / nx;
+  const float dy = (gmax_y - gmin_y) / ny;
+
   std::vector<ParticleHost> new_hosts(num_gpus);
   for (size_t i = 0; i < merged.n; ++i) {
     const float x = merged.positions[i].x;
-    // Find the owning GPU: linear scan is fine for small N
-    int g = 0;
-    while (g < num_gpus - 1 && x >= doms[g].owned_max.x)
-      ++g;
+    const float y = merged.positions[i].y;
+    int gx = static_cast<int>((x - gmin_x) / dx);
+    int gy = static_cast<int>((y - gmin_y) / dy);
+    gx = std::min(std::max(gx, 0), nx - 1);
+    gy = std::min(std::max(gy, 0), ny - 1);
+    int g = gy * nx + gx;
     new_hosts[g].push(merged.positions[i], merged.velocities[i],
                       merged.masses[i], merged.radii[i], merged.kn[i],
                       merged.gamma_n[i], merged.gamma_t[i], merged.mu[i],

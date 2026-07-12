@@ -127,11 +127,22 @@ inline void writeDomainBoundaryVTK(const Vec3 domain_min,
     { lines.push_back({2, l[0], l[1]}); line_types.push_back(0); }
 #endif
 
-  // --- Owned-region split lines ---
-  for (int g = 0; g < num_gpus - 1; ++g) {
-    float sx = doms[g].owned_max.x;
+  // --- Owned-region split lines (grid boundaries) ---
+  const int nx = doms[0].grid_nx, ny = doms[0].grid_ny;
+  const float dx = (max_x - min_x) / nx;
+  const float dy = (max_y - min_y) / ny;
+  // X splits (vertical lines)
+  for (int gx = 1; gx < nx; ++gx) {
+    float sx = min_x + gx * dx;
     int b = addPt(sx, min_y, min_z), t = addPt(sx, max_y, max_z);
     lines.push_back({2, b, t});
+    line_types.push_back(1);
+  }
+  // Y splits (horizontal lines)
+  for (int gy = 1; gy < ny; ++gy) {
+    float sy = min_y + gy * dy;
+    int l = addPt(min_x, sy, min_z), r = addPt(max_x, sy, max_z);
+    lines.push_back({2, l, r});
     line_types.push_back(1);
   }
 
@@ -143,22 +154,40 @@ inline void writeDomainBoundaryVTK(const Vec3 domain_min,
 #else
     float lo_z = 0, hi_z = 0;
 #endif
-    // Left halo (has a left neighbor)
+    // Left halo
     if (d.left_neighbor >= 0) {
-      int a = addPt(d.local_min.x, min_y, lo_z);
-      int b = addPt(d.owned_min.x, min_y, lo_z);
-      int c = addPt(d.owned_min.x, max_y, hi_z);
-      int d_ = addPt(d.local_min.x, max_y, hi_z);
-      polys.push_back({4, a, b, c, d_});
+      int a = addPt(d.local_min.x, d.owned_min.y, lo_z);
+      int b = addPt(d.owned_min.x, d.owned_min.y, lo_z);
+      int c = addPt(d.owned_min.x, d.owned_max.y, hi_z);
+      int dd = addPt(d.local_min.x, d.owned_max.y, hi_z);
+      polys.push_back({4, a, b, c, dd});
       poly_types.push_back(2);
     }
-    // Right halo (has a right neighbor)
+    // Right halo
     if (d.right_neighbor >= 0) {
-      int a = addPt(d.owned_max.x, min_y, lo_z);
-      int b = addPt(d.local_max.x, min_y, lo_z);
-      int c = addPt(d.local_max.x, max_y, hi_z);
-      int d_ = addPt(d.owned_max.x, max_y, hi_z);
-      polys.push_back({4, a, b, c, d_});
+      int a = addPt(d.owned_max.x, d.owned_min.y, lo_z);
+      int b = addPt(d.local_max.x, d.owned_min.y, lo_z);
+      int c = addPt(d.local_max.x, d.owned_max.y, hi_z);
+      int dd = addPt(d.owned_max.x, d.owned_max.y, hi_z);
+      polys.push_back({4, a, b, c, dd});
+      poly_types.push_back(2);
+    }
+    // Bottom halo
+    if (d.bottom_neighbor >= 0) {
+      int a = addPt(d.owned_min.x, d.local_min.y, lo_z);
+      int b = addPt(d.owned_max.x, d.local_min.y, lo_z);
+      int c = addPt(d.owned_max.x, d.owned_min.y, hi_z);
+      int dd = addPt(d.owned_min.x, d.owned_min.y, hi_z);
+      polys.push_back({4, a, b, c, dd});
+      poly_types.push_back(2);
+    }
+    // Top halo
+    if (d.top_neighbor >= 0) {
+      int a = addPt(d.owned_min.x, d.owned_max.y, lo_z);
+      int b = addPt(d.owned_max.x, d.owned_max.y, lo_z);
+      int c = addPt(d.owned_max.x, d.local_max.y, hi_z);
+      int dd = addPt(d.owned_min.x, d.local_max.y, hi_z);
+      polys.push_back({4, a, b, c, dd});
       poly_types.push_back(2);
     }
   }
