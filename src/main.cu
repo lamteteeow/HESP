@@ -54,11 +54,11 @@ static ParticleHost toHost(const ParticleData &src, int &id_offset) {
 int main(int argc, char **argv) {
   if (argc < 2) {
     std::cerr << "Usage: " << argv[0]
-              << " <scene.json> [max_steps] [num_gpus]\n";
+              << " <scene.json> [max_steps] [num_gpus] [vtk_interval]\n";
     return 1;
   }
   const long max_steps = (argc > 2) ? std::stol(argv[2]) : 100000;
-  const int steps_per_frame = 50; // write VTK every N steps
+  const int steps_per_frame = (argc > 4) ? std::stoi(argv[4]) : 20;
 
   try {
 

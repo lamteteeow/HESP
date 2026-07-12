@@ -164,7 +164,7 @@ inline void writeDomainBoundaryVTK(const Vec3 domain_min,
     // Outside = negative side of the face normal.
     polys.push_back({4, p000, p100, p110, p010}); // -z  bottom
     polys.push_back({4, p001, p101, p111, p011}); // +z  top
-    polys.push_back({4, p000, p001, p011, p010}); // -x  left
+    polys.push_back({4, p000, p010, p011, p001}); // -x  left
     polys.push_back({4, p100, p110, p111, p101}); // +x  right
     polys.push_back({4, p000, p100, p101, p001}); // -y  front
     polys.push_back({4, p010, p110, p111, p011}); // +y  back
