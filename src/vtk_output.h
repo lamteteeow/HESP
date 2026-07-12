@@ -190,18 +190,27 @@ inline void writeDomainBoundaryVTK(const Vec3 domain_min,
   for (int g = 0; g < num_gpus; ++g) {
     const Domain &d = doms[g];
 #ifdef MD3D
-    float lo_z = min_z, hi_z = max_z;
+    float z0 = d.owned_min.z, z1 = d.owned_max.z;
 #else
-    float lo_z = 0, hi_z = 0;
+    float z0 = 0, z1 = 0;
 #endif
+    // X halos: span GPU's owned Y and Z range
     if (d.left_neighbor >= 0)
-      addBox(d.local_min.x, d.owned_min.x, d.owned_min.y, d.owned_max.y, lo_z, hi_z);
+      addBox(d.local_min.x, d.owned_min.x, d.owned_min.y, d.owned_max.y, z0, z1);
     if (d.right_neighbor >= 0)
-      addBox(d.owned_max.x, d.local_max.x, d.owned_min.y, d.owned_max.y, lo_z, hi_z);
+      addBox(d.owned_max.x, d.local_max.x, d.owned_min.y, d.owned_max.y, z0, z1);
+    // Y halos: span GPU's owned X and Z range
     if (d.bottom_neighbor >= 0)
-      addBox(d.owned_min.x, d.owned_max.x, d.local_min.y, d.owned_min.y, lo_z, hi_z);
+      addBox(d.owned_min.x, d.owned_max.x, d.local_min.y, d.owned_min.y, z0, z1);
     if (d.top_neighbor >= 0)
-      addBox(d.owned_min.x, d.owned_max.x, d.owned_max.y, d.local_max.y, lo_z, hi_z);
+      addBox(d.owned_min.x, d.owned_max.x, d.owned_max.y, d.local_max.y, z0, z1);
+    // Z halos: span GPU's owned X and Y range, own Z boundary only
+    if (d.back_neighbor >= 0)
+      addBox(d.owned_min.x, d.owned_max.x, d.owned_min.y, d.owned_max.y,
+             d.local_min.z, d.owned_min.z);
+    if (d.front_neighbor >= 0)
+      addBox(d.owned_min.x, d.owned_max.x, d.owned_min.y, d.owned_max.y,
+             d.owned_max.z, d.local_max.z);
   }
 
   // ---- Write VTK ----
