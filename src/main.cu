@@ -177,7 +177,7 @@ int main(int argc, char **argv) {
     for (long step = 0; step < max_steps; ++step) {
 
       // --- Halo exchange: populate ghost particles on each GPU ---
-      exchangeHalos(pds, doms, halo_bufs, BLOCK);
+      int ghosts = exchangeHalos(pds, doms, halo_bufs, BLOCK);
 
       // --- Assign cells (owned + halo) on each GPU ---
       for (int g = 0; g < num_gpus; ++g) {
@@ -324,9 +324,9 @@ int main(int argc, char **argv) {
           }
         }
 
-        printf("step %6ld  frame %4d  KE=%.4e  P=(%.3e,%.3e,%.3e)  contacts=%d",
+        printf("step %6ld  frame %4d  KE=%.4e  P=(%.3e,%.3e,%.3e)  contacts=%d  ghosts=%d",
                step, frame - 1, total_ke, total_px, total_py, total_pz,
-               step_contacts);
+               step_contacts, ghosts);
         for (int g = 0; g < num_gpus; ++g)
           printf("  GPU%d:%zu", g, pds[g].n);
         printf("\n");

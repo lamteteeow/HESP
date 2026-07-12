@@ -51,7 +51,8 @@ inline int packStrip(const ParticleDevice &pd, float lo, float hi,
 
 // Halo exchange using GPU-side packing + cudaMemcpyPeer.
 // No CPU staging of particle data — only 4-byte counts cross the bus.
-inline void exchangeHalos(std::vector<ParticleDevice> &pds,
+// Returns total ghost particles transferred (for diagnostics).
+inline int exchangeHalos(std::vector<ParticleDevice> &pds,
                           const std::vector<Domain> &doms,
                           std::vector<HaloPackBuf> &halo_bufs,
                           dim3 block) {
@@ -154,6 +155,15 @@ inline void exchangeHalos(std::vector<ParticleDevice> &pds,
 
     pds[g].n_total = off;
   }
+
+  // Return total ghost count for diagnostics
+  int total_ghosts = 0;
+  for (int g = 0; g < num_gpus; ++g) {
+    total_ghosts += right[g].count + left[g].count;
+    total_ghosts += top[g].count + bottom[g].count;
+    total_ghosts += front[g].count + back[g].count;
+  }
+  return total_ghosts;
 }
 
 #endif // HALO_EXCHANGE_H
