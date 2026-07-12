@@ -87,7 +87,14 @@ inline void writeDomainBoundaryVTK(const Vec3 domain_min,
     throw std::runtime_error("Failed to open domain boundary VTK file");
 
   // z is 0 for 2D
-  const float z = 0.0f;
+  float min_z = domain_min.z, max_z = domain_max.z;
+#ifdef MD3D
+  min_z = domain_min.z;
+  max_z = domain_max.z;
+#else
+  min_z = 0.0f;
+  max_z = 0.0f;
+#endif
   const float min_x = domain_min.x, min_y = domain_min.y;
   const float max_x = domain_max.x, max_y = domain_max.y;
 
@@ -95,9 +102,48 @@ inline void writeDomainBoundaryVTK(const Vec3 domain_min,
   const int num_gpus = static_cast<int>(doms.size());
   const int num_split_lines = num_gpus - 1;
 
-  // Points: 4 for outer box + 2 * num_split_lines for verticals
+#ifdef MD3D
+  // 8 corners for 3D box + 2 * num_split_lines for verticals
+  const int npts = 8 + 2 * num_split_lines;
+  const int nlines = 12 + num_split_lines;
+
+  f << "# vtk DataFile Version 3.0\n";
+  f << "Domain boundary\nASCII\nDATASET POLYDATA\n\n";
+
+  f << "POINTS " << npts << " float\n";
+  // 8 corners of the 3D box
+  f << min_x << " " << min_y << " " << min_z << "\n";  // 0
+  f << max_x << " " << min_y << " " << min_z << "\n";  // 1
+  f << max_x << " " << max_y << " " << min_z << "\n";  // 2
+  f << min_x << " " << max_y << " " << min_z << "\n";  // 3
+  f << min_x << " " << min_y << " " << max_z << "\n";  // 4
+  f << max_x << " " << min_y << " " << max_z << "\n";  // 5
+  f << max_x << " " << max_y << " " << max_z << "\n";  // 6
+  f << min_x << " " << max_y << " " << max_z << "\n";  // 7
+
+  // Vertical split lines (same as 2D, spanning full z)
+  int pi = 8;
+  for (int g = 0; g < num_gpus - 1; ++g) {
+    const float sx = doms[g].owned_max.x;
+    f << sx << " " << min_y << " " << min_z << "\n";
+    f << sx << " " << max_y << " " << max_z << "\n";
+  }
+
+  // 12 edges of the box + split lines
+  f << "\nLINES " << nlines << " " << (3 * 12 + 3 * num_split_lines) << "\n";
+  f << "2 0 1\n2 1 2\n2 2 3\n2 3 0\n";  // bottom face
+  f << "2 4 5\n2 5 6\n2 6 7\n2 7 4\n";  // top face
+  f << "2 0 4\n2 1 5\n2 2 6\n2 3 7\n";  // vertical edges
+
+  pi = 8;
+  for (int g = 0; g < num_gpus - 1; ++g) {
+    f << "2 " << pi << " " << (pi + 1) << "\n";
+    pi += 2;
+  }
+
+#else
+  // 4 corners for 2D rectangle + 2 * num_split_lines for verticals
   const int npts = 4 + 2 * num_split_lines;
-  // Lines: 4 for outer box + num_split_lines verticals
   const int nlines = 4 + num_split_lines;
 
   f << "# vtk DataFile Version 3.0\n";
@@ -105,17 +151,17 @@ inline void writeDomainBoundaryVTK(const Vec3 domain_min,
 
   f << "POINTS " << npts << " float\n";
   // Outer box corners
-  f << min_x << " " << min_y << " " << z << "\n";  // 0: bottom-left
-  f << max_x << " " << min_y << " " << z << "\n";  // 1: bottom-right
-  f << max_x << " " << max_y << " " << z << "\n";  // 2: top-right
-  f << min_x << " " << max_y << " " << z << "\n";  // 3: top-left
+  f << min_x << " " << min_y << " " << min_z << "\n";  // 0: bottom-left
+  f << max_x << " " << min_y << " " << min_z << "\n";  // 1: bottom-right
+  f << max_x << " " << max_y << " " << min_z << "\n";  // 2: top-right
+  f << min_x << " " << max_y << " " << min_z << "\n";  // 3: top-left
 
   // Vertical split lines at owned_max.x for each GPU (except last)
   int pi = 4;
   for (int g = 0; g < num_gpus - 1; ++g) {
     const float sx = doms[g].owned_max.x;
-    f << sx << " " << min_y << " " << z << "\n";  // bottom
-    f << sx << " " << max_y << " " << z << "\n";  // top
+    f << sx << " " << min_y << " " << min_z << "\n";  // bottom
+    f << sx << " " << max_y << " " << min_z << "\n";  // top
   }
 
   // Each line entry: <npoints> <idx0> <idx1 ...>
@@ -130,6 +176,7 @@ inline void writeDomainBoundaryVTK(const Vec3 domain_min,
     f << "2 " << pi << " " << (pi + 1) << "\n";
     pi += 2;
   }
+#endif
 
   f.close();
 }

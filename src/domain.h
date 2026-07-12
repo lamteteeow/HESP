@@ -56,7 +56,12 @@ inline std::vector<Domain> buildDomains(Vec3 gmin, Vec3 gmax, float halo_width,
         std::ceil((d.local_max.x - d.local_min.x) / cell_size));
     d.num_cells.y = static_cast<int>(
         std::ceil((d.local_max.y - d.local_min.y) / cell_size));
+#ifdef MD3D
+    d.num_cells.z = static_cast<int>(
+        std::ceil((d.local_max.z - d.local_min.z) / cell_size));
+#else
     d.num_cells.z = 1; // 2D: single layer in z
+#endif
     d.total_cells = d.num_cells.x * d.num_cells.y * d.num_cells.z;
   }
 

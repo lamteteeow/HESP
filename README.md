@@ -7,6 +7,7 @@ decomposition** across the X axis.
 
 ```bash
 make                     # CUDA toolkit required (≥ 11.0)
+make md3d                # 3D binary (defines MD3D)
 ```
 
 On the TinyGPU cluster:

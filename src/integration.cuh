@@ -3,9 +3,8 @@
 #include "vec3.cuh"
 #include <cuda_runtime.h>
 
-// Elastic wall reflection for x and y.
-// z is intentionally ignored — it is constrained to 0 by the 2D integration
-// kernel.
+// Elastic wall reflection for all axes.
+// In 2D mode (default), z walls are at z=0 so z reflection is a no-op.
 __device__ inline void reflectWalls(Vec3 &pos, Vec3 &vel, float r,
                                     const Vec3 gmin, const Vec3 gmax) {
   if (pos.x - r < gmin.x) {
@@ -24,10 +23,19 @@ __device__ inline void reflectWalls(Vec3 &pos, Vec3 &vel, float r,
     pos.y = gmax.y - r;
     vel.y = -fabsf(vel.y);
   }
+  if (pos.z - r < gmin.z) {
+    pos.z = gmin.z + r;
+    vel.z = fabsf(vel.z);
+  }
+  if (pos.z + r > gmax.z) {
+    pos.z = gmax.z - r;
+    vel.z = -fabsf(vel.z);
+  }
 }
 
 // Symplectic Euler integration for owned particles.
-// Enforces 2D (z = 0, vz = 0) and reflective walls.
+// In 2D mode (default), z is clamped to 0.
+// In 3D mode (-DMD3D), all three axes are free.
 // Only runs for indices [0, n) — halo particles are never integrated.
 __global__ inline void integrate(const float dt, const size_t n,
                                  Vec3 *d_positions, Vec3 *d_velocities,
@@ -44,11 +52,13 @@ __global__ inline void integrate(const float dt, const size_t n,
   // Position update
   d_positions[i] += dt * d_velocities[i];
 
-  // Enforce 2D plane
+#ifndef MD3D
+  // Enforce 2D plane (compile with -DMD3D to disable)
   d_positions[i].z = 0.0f;
   d_velocities[i].z = 0.0f;
+#endif
 
-  // Reflective domain walls (x and y only)
+  // Reflective domain walls
   reflectWalls(d_positions[i], d_velocities[i], d_radii[i], global_min,
                global_max);
 }

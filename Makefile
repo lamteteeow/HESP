@@ -51,30 +51,38 @@ NVCCFLAGS += -rdc=true
 LDFLAGS := -rdc=true
 
 # ---------------------------------------------------------------------------
-# Source and target
+# Source and targets
 # ---------------------------------------------------------------------------
-SRC    := src/main.cu
-TARGET := md2d
+SRC        := src/main.cu
+TARGET_2D  := md2d
+
+# 3D build: add -DMD3D to enable third dimension
+NVCCFLAGS_3D := $(NVCCFLAGS) -DMD3D
+TARGET_3D    := md3d
 
 # ---------------------------------------------------------------------------
 # Rules
 # ---------------------------------------------------------------------------
-.PHONY: all clean help
+.PHONY: all clean help md3d
 
-all: $(TARGET)
+all: $(TARGET_2D)
 
-$(TARGET): $(SRC)
+$(TARGET_2D): $(SRC)
 	$(NVCC) $(NVCCFLAGS) -o $@ $(SRC) $(LDFLAGS)
 
+md3d: $(SRC)
+	$(NVCC) $(NVCCFLAGS_3D) -o $(TARGET_3D) $(SRC) $(LDFLAGS)
+
 clean:
-	rm -f $(TARGET)
+	rm -f $(TARGET_2D) $(TARGET_3D)
 
 help:
-	@echo "md2d — GPU-accelerated 2D molecular dynamics simulator"
+	@echo "md2d / md3d — GPU-accelerated 2D/3D molecular dynamics simulator"
 	@echo ""
 	@echo "Targets:"
-	@echo "  all       build the md2d binary (default)"
-	@echo "  clean     remove the binary"
+	@echo "  all       build md2d (2D binary, default)"
+	@echo "  md3d      build md3d (3D binary, defines MD3D)"
+	@echo "  clean     remove binaries"
 	@echo ""
 	@echo "Variables:"
 	@echo "  CUDA_HOME     path to CUDA toolkit (default: auto-detect from PATH)"
