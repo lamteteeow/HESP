@@ -253,21 +253,22 @@ int main(int argc, char **argv) {
           reorder(gpu_owner);
         }
 
-        // Compute border fraction: 0 = interior, 1 = at halo edge
+        // Compute border fraction: 0 = interior, 1 = at halo edge.
+        // Only counts boundaries where a neighbor GPU actually exists.
         std::vector<float> border(pos.size(), 0.0f);
         for (size_t i = 0; i < pos.size(); ++i) {
           const Domain &d = doms[gpu_owner[i]];
           const float x = pos[i].x, y = pos[i].y;
-          // Distance from each owned boundary, normalised to halo_width
-          auto edge = [&](float coord, float own_lo, float own_hi) -> float {
-            float d_lo = (coord - own_lo) / d.halo_width;
-            float d_hi = (own_hi - coord) / d.halo_width;
-            if (d_lo >= 0 && d_lo < 1) return 1.0f - d_lo;
-            if (d_hi >= 0 && d_hi < 1) return 1.0f - d_hi;
-            return 0.0f;
+          auto f = [&](float coord, float own, bool check_lo) -> float {
+            float dist = (check_lo ? (coord - own) : (own - coord))
+                       / d.halo_width;
+            return (dist >= 0 && dist < 1) ? 1.0f - dist : 0.0f;
           };
-          float bx = edge(x, d.owned_min.x, d.owned_max.x);
-          float by = edge(y, d.owned_min.y, d.owned_max.y);
+          float bx = 0.0f, by = 0.0f;
+          if (d.left_neighbor   >= 0) bx = std::max(bx, f(x, d.owned_min.x, true));
+          if (d.right_neighbor  >= 0) bx = std::max(bx, f(x, d.owned_max.x, false));
+          if (d.bottom_neighbor >= 0) by = std::max(by, f(y, d.owned_min.y, true));
+          if (d.top_neighbor    >= 0) by = std::max(by, f(y, d.owned_max.y, false));
           border[i] = std::max(bx, by);
         }
 
