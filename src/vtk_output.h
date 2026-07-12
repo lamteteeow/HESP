@@ -155,18 +155,27 @@ inline void writeDomainBoundaryVTK(const Vec3 domain_min,
   // --- Halo strips (filled 3D boxes, or 2D rectangles) ---
   // Helper: add 8 corners of a box and return the 6 face quads
   auto addBox = [&](float x0, float x1, float y0, float y1, float z0, float z1) {
+#ifdef MD3D
     int p000 = addPt(x0, y0, z0), p100 = addPt(x1, y0, z0);
     int p110 = addPt(x1, y1, z0), p010 = addPt(x0, y1, z0);
     int p001 = addPt(x0, y0, z1), p101 = addPt(x1, y0, z1);
     int p111 = addPt(x1, y1, z1), p011 = addPt(x0, y1, z1);
-    // 6 faces (vertex order: counter-clockwise viewed from outside the box)
-    polys.push_back({4, p000, p100, p110, p010}); // bottom (-z)
-    polys.push_back({4, p001, p101, p111, p011}); // top    (+z)
-    polys.push_back({4, p000, p001, p011, p010}); // left   (-x)
-    polys.push_back({4, p100, p110, p111, p101}); // right  (+x)
-    polys.push_back({4, p000, p100, p101, p001}); // front  (-y)
-    polys.push_back({4, p010, p011, p111, p110}); // back   (+y)
+    // Each face: 4 points CCW when viewed from outside the box.
+    // Outside = negative side of the face normal.
+    polys.push_back({4, p000, p100, p110, p010}); // -z  bottom
+    polys.push_back({4, p001, p101, p111, p011}); // +z  top
+    polys.push_back({4, p000, p001, p011, p010}); // -x  left
+    polys.push_back({4, p100, p110, p111, p101}); // +x  right
+    polys.push_back({4, p000, p100, p101, p001}); // -y  front
+    polys.push_back({4, p010, p110, p111, p011}); // +y  back
     for (int k = 0; k < 6; ++k) poly_types.push_back(2);
+#else
+    // 2D: single flat quad at z=0
+    int a = addPt(x0, y0, 0), b = addPt(x1, y0, 0);
+    int c = addPt(x1, y1, 0), d = addPt(x0, y1, 0);
+    polys.push_back({4, a, b, c, d});
+    poly_types.push_back(2);
+#endif
   };
 
   for (int g = 0; g < num_gpus; ++g) {
