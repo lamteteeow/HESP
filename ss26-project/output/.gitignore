@@ -1,2 +1,0 @@
-# Track this directory but ignore generated VTK output inside it.
-out_vtk_*/
