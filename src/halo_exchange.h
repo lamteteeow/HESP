@@ -31,15 +31,18 @@ inline void freeHaloPackBuf(HaloPackBuf &b) {
 }
 
 // GPU-side pack kernel + count retrieval.  Only 4 bytes come back to CPU.
+// 'buf_off' is the starting index in the output buffer (cumulative offset).
 inline int packStrip(const ParticleDevice &pd, float lo, float hi,
-                     int axis, HaloPackBuf &buf, dim3 block) {
+                     int axis, HaloPackBuf &buf, dim3 block, size_t buf_off) {
   cudaMemset(buf.d_count, 0, sizeof(int));
   if (pd.n == 0) return 0;
   dim3 grid((pd.n + block.x - 1) / block.x);
   packHaloParticles<<<grid, block>>>(pd.n,
       pd.d_positions, pd.d_velocities, pd.d_radii, pd.d_kn, pd.d_gamma_n,
       lo, hi, axis,
-      buf.d_count, buf.d_pos, buf.d_vel, buf.d_rad, buf.d_kn, buf.d_gn);
+      buf.d_count,
+      buf.d_pos + buf_off, buf.d_vel + buf_off,
+      buf.d_rad + buf_off, buf.d_kn + buf_off, buf.d_gn + buf_off);
   cudaGetLastError();
   int count = 0;
   cudaMemcpy(&count, buf.d_count, sizeof(int), cudaMemcpyDeviceToHost);
@@ -55,51 +58,70 @@ inline void exchangeHalos(std::vector<ParticleDevice> &pds,
   const int num_gpus = static_cast<int>(pds.size());
 
   // Per-GPU strip: packed data sits in that GPU's halo_bufs[g]
-  struct Strip { int count; };
+  struct Strip { int count; size_t off; };
   std::vector<Strip> right(num_gpus), left(num_gpus);
   std::vector<Strip> top(num_gpus), bottom(num_gpus);
   std::vector<Strip> front(num_gpus), back(num_gpus);
 
-  // --- Phase 1: pack strips on each GPU (GPU-side filter) ---
+  // --- Phase 1: pack strips on each GPU with cumulative offsets ---
   for (int g = 0; g < num_gpus; ++g) {
     const Domain &dom = doms[g];
     cudaSetDevice(g);
+    size_t off = 0;
 
-    if (dom.right_neighbor >= 0)
+    if (dom.right_neighbor >= 0) {
+      right[g].off = off;
       right[g].count = packStrip(pds[g], dom.owned_max.x - dom.halo_width,
-                                  dom.owned_max.x, 0, halo_bufs[g], block);
-    if (dom.left_neighbor >= 0)
+                                  dom.owned_max.x, 0, halo_bufs[g], block, off);
+      off += right[g].count;
+    }
+    if (dom.left_neighbor >= 0) {
+      left[g].off = off;
       left[g].count = packStrip(pds[g], dom.owned_min.x,
-                                 dom.owned_min.x + dom.halo_width, 0, halo_bufs[g], block);
-    if (dom.top_neighbor >= 0)
+                                 dom.owned_min.x + dom.halo_width, 0, halo_bufs[g], block, off);
+      off += left[g].count;
+    }
+    if (dom.top_neighbor >= 0) {
+      top[g].off = off;
       top[g].count = packStrip(pds[g], dom.owned_max.y - dom.halo_width,
-                                dom.owned_max.y, 1, halo_bufs[g], block);
-    if (dom.bottom_neighbor >= 0)
+                                dom.owned_max.y, 1, halo_bufs[g], block, off);
+      off += top[g].count;
+    }
+    if (dom.bottom_neighbor >= 0) {
+      bottom[g].off = off;
       bottom[g].count = packStrip(pds[g], dom.owned_min.y,
-                                   dom.owned_min.y + dom.halo_width, 1, halo_bufs[g], block);
-    if (dom.front_neighbor >= 0)
+                                   dom.owned_min.y + dom.halo_width, 1, halo_bufs[g], block, off);
+      off += bottom[g].count;
+    }
+    if (dom.front_neighbor >= 0) {
+      front[g].off = off;
       front[g].count = packStrip(pds[g], dom.owned_max.z - dom.halo_width,
-                                  dom.owned_max.z, 2, halo_bufs[g], block);
-    if (dom.back_neighbor >= 0)
+                                  dom.owned_max.z, 2, halo_bufs[g], block, off);
+      off += front[g].count;
+    }
+    if (dom.back_neighbor >= 0) {
+      back[g].off = off;
       back[g].count = packStrip(pds[g], dom.owned_min.z,
-                                 dom.owned_min.z + dom.halo_width, 2, halo_bufs[g], block);
+                                 dom.owned_min.z + dom.halo_width, 2, halo_bufs[g], block, off);
+      off += back[g].count;
+    }
   }
 
   // Helper: copy packed strip from src GPU's buf → dst GPU's particle arrays
-  auto copyPeer = [&](int dst_gpu, int src_gpu, const Strip &s,
-                      size_t &off) {
+  auto copyPeer = [&](int dst_gpu, int src_gpu, const Strip &s, size_t &off) {
     if (s.count == 0) return;
     int nh = s.count;
+    size_t src_off = s.off;
     cudaMemcpyPeer(pds[dst_gpu].d_positions + off, dst_gpu,
-                   halo_bufs[src_gpu].d_pos, src_gpu, nh * sizeof(Vec3));
+                   halo_bufs[src_gpu].d_pos + src_off, src_gpu, nh * sizeof(Vec3));
     cudaMemcpyPeer(pds[dst_gpu].d_velocities + off, dst_gpu,
-                   halo_bufs[src_gpu].d_vel, src_gpu, nh * sizeof(Vec3));
+                   halo_bufs[src_gpu].d_vel + src_off, src_gpu, nh * sizeof(Vec3));
     cudaMemcpyPeer(pds[dst_gpu].d_radii + off, dst_gpu,
-                   halo_bufs[src_gpu].d_rad, src_gpu, nh * sizeof(float));
+                   halo_bufs[src_gpu].d_rad + src_off, src_gpu, nh * sizeof(float));
     cudaMemcpyPeer(pds[dst_gpu].d_kn + off, dst_gpu,
-                   halo_bufs[src_gpu].d_kn, src_gpu, nh * sizeof(float));
+                   halo_bufs[src_gpu].d_kn + src_off, src_gpu, nh * sizeof(float));
     cudaMemcpyPeer(pds[dst_gpu].d_gamma_n + off, dst_gpu,
-                   halo_bufs[src_gpu].d_gn, src_gpu, nh * sizeof(float));
+                   halo_bufs[src_gpu].d_gn + src_off, src_gpu, nh * sizeof(float));
     off += nh;
   };
 
