@@ -54,35 +54,37 @@ LDFLAGS := -rdc=true
 # Source and targets
 # ---------------------------------------------------------------------------
 SRC        := src/main.cu
-TARGET_2D  := md2d
+TARGET      := md2d
 
-# 3D build: add -DMD3D to enable third dimension
+# 3D build: add -DMD3D for full 3D decomposition
 NVCCFLAGS_3D := $(NVCCFLAGS) -DMD3D
 TARGET_3D    := md3d
 
 # ---------------------------------------------------------------------------
 # Rules
 # ---------------------------------------------------------------------------
-.PHONY: all clean help md3d
+.PHONY: all clean help md2d
 
-all: $(TARGET_2D)
+# Default: 3D binary
+all: md3d
 
-$(TARGET_2D): $(SRC)
-	$(NVCC) $(NVCCFLAGS) -o $@ $(SRC) $(LDFLAGS)
+$(TARGET_3D): $(SRC)
+	$(NVCC) $(NVCCFLAGS_3D) -o $@ $(SRC) $(LDFLAGS)
 
-md3d: $(SRC)
-	$(NVCC) $(NVCCFLAGS_3D) -o $(TARGET_3D) $(SRC) $(LDFLAGS)
+# Legacy 2D binary (z=0 enforced, X-only split)
+md2d: $(SRC)
+	$(NVCC) $(NVCCFLAGS) -o $(TARGET) $(SRC) $(LDFLAGS)
 
 clean:
-	rm -f $(TARGET_2D) $(TARGET_3D)
+	rm -f $(TARGET) $(TARGET_3D)
 
 help:
 	@echo "md2d / md3d — GPU-accelerated 2D/3D molecular dynamics simulator"
 	@echo ""
 	@echo "Targets:"
-	@echo "  all       build md2d (2D binary, default)"
-	@echo "  md3d      build md3d (3D binary, defines MD3D)"
-	@echo "  clean     remove binaries"
+	@echo "  make       build md3d (3D binary, default)"
+	@echo "  make md2d  build md2d (2D binary, z=0 enforced)"
+	@echo "  make clean remove binaries"
 	@echo ""
 	@echo "Variables:"
 	@echo "  CUDA_HOME     path to CUDA toolkit (default: auto-detect from PATH)"
