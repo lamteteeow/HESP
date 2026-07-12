@@ -1,4 +1,4 @@
-# md2d — GPU-accelerated 3D DEM simulator with N-GPU domain decomposition
+# md3d — Multi-GPU 3D DEM simulator
 
 Spring-dashpot DEM (Discrete Element Method) with **nx×ny×nz grid decomposition**
 (factored from N GPUs). Each GPU exchanges halo particles in up to 6 directions

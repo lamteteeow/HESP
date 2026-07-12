@@ -55,10 +55,8 @@ LDFLAGS := -rdc=true
 # ---------------------------------------------------------------------------
 SRC        := src/main.cu
 TARGET      := md2d
-
-# 3D build: add -DMD3D for full 3D decomposition
+TARGET_3D   := md3d
 NVCCFLAGS_3D := $(NVCCFLAGS) -DMD3D
-TARGET_3D    := md3d
 
 # ---------------------------------------------------------------------------
 # Rules
@@ -79,7 +77,7 @@ clean:
 	rm -f $(TARGET) $(TARGET_3D)
 
 help:
-	@echo "md2d / md3d — GPU-accelerated 2D/3D molecular dynamics simulator"
+	@echo "md3d — Multi-GPU 3D DEM simulator"
 	@echo ""
 	@echo "Targets:"
 	@echo "  make       build md3d (3D binary, default)"
