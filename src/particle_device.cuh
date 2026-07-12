@@ -32,6 +32,8 @@ struct ParticleDevice {
   float *d_mu;
   Vec3 *d_forces;
 
+  int *d_ids; // particle IDs (size = capacity, owned+halo), read-only
+
   // Cell linked list (covers n_total particles; d_cellHeads covers total_cells)
   int *d_cellHeads;
   int *d_cellTails;   // size = capacity

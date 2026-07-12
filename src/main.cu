@@ -42,11 +42,12 @@ static std::string sceneName(const char *path) {
 }
 
 // Convert ParticleData → ParticleHost for upload.
-static ParticleHost toHost(const ParticleData &src) {
+// Assigns sequential particle IDs starting from id_offset.
+static ParticleHost toHost(const ParticleData &src, int &id_offset) {
   ParticleHost h;
   for (size_t i = 0; i < src.n; ++i)
     h.push(src.positions[i], src.velocities[i], src.masses[i], src.radii[i],
-           src.kn[i], src.gamma_n[i], src.gamma_t[i], src.mu[i]);
+           src.kn[i], src.gamma_n[i], src.gamma_t[i], src.mu[i], id_offset++);
   return h;
 }
 
@@ -129,8 +130,9 @@ int main(int argc, char **argv) {
     splitIntoN(global, doms, per_gpu);
 
     std::vector<ParticleDevice> pds(num_gpus);
+    int next_id = 0;
     for (int g = 0; g < num_gpus; ++g) {
-      ParticleHost h = toHost(per_gpu[g]);
+      ParticleHost h = toHost(per_gpu[g], next_id);
       CHECK_CUDA(cudaSetDevice(g));
       h.upload(pds[g], doms[g].total_cells, global.n);
       printf("  GPU%d: %zu owned particles uploaded\n", g, pds[g].n);
@@ -214,48 +216,46 @@ int main(int argc, char **argv) {
       if (step % steps_per_frame == 0) {
         std::vector<Vec3> pos, vel;
         std::vector<float> rad;
+        std::vector<int> pid, gpu_owner;
 
         for (int g = 0; g < num_gpus; ++g) {
           CHECK_CUDA(cudaSetDevice(g));
           ParticleHost h;
           h.download(pds[g]);
-          pos.insert(pos.end(), h.positions.begin(), h.positions.begin() + h.n);
-          vel.insert(vel.end(), h.velocities.begin(),
-                     h.velocities.begin() + h.n);
-          rad.insert(rad.end(), h.radii.begin(), h.radii.begin() + h.n);
+          for (size_t i = 0; i < h.n; ++i) {
+            pos.push_back(h.positions[i]);
+            vel.push_back(h.velocities[i]);
+            rad.push_back(h.radii[i]);
+            pid.push_back(h.ids[i]);
+            gpu_owner.push_back(g);
+          }
         }
 
-        // Stable sort by radius to prevent ParaView flicker across frames
+        // Stable sort by particle ID (unique, invariant)
         {
           std::vector<size_t> idx(pos.size());
           for (size_t i = 0; i < idx.size(); ++i)
             idx[i] = i;
           std::sort(idx.begin(), idx.end(),
-                    [&](size_t a, size_t b) {
-                      if (rad[a] != rad[b])
-                        return rad[a] < rad[b];
-                      if (pos[a].x != pos[b].x)
-                        return pos[a].x < pos[b].x;
-                      return pos[a].y < pos[b].y;
-                    });
-          std::vector<Vec3> pos2(pos.size()), vel2(pos.size());
-          std::vector<float> rad2(pos.size());
-          for (size_t i = 0; i < idx.size(); ++i) {
-            pos2[i] = pos[idx[i]];
-            vel2[i] = vel[idx[i]];
-            rad2[i] = rad[idx[i]];
-          }
-          pos.swap(pos2);
-          vel.swap(vel2);
-          rad.swap(rad2);
+                    [&](size_t a, size_t b) { return pid[a] < pid[b]; });
+          auto reorder = [&](auto &v) {
+            auto v2 = v;
+            for (size_t i = 0; i < idx.size(); ++i)
+              v[i] = v2[idx[i]];
+          };
+          reorder(pos);
+          reorder(vel);
+          reorder(rad);
+          reorder(gpu_owner);
         }
 
-        writeParticlesVTK(frame, pos, vel, rad, scene, max_steps);
+        writeParticlesVTK(frame, pos, vel, rad, gpu_owner, scene, max_steps);
 
-        // Write domain boundary once (first frame only)
-        if (frame == 0)
-          writeDomainBoundaryVTK(cfg.domain_min, cfg.domain_max, scene,
+        // Write domain decomposition lines once (first frame only)
+        if (frame == 0) {
+          writeDomainBoundaryVTK(cfg.domain_min, cfg.domain_max, doms, scene,
                                  max_steps);
+        }
 
         ++frame;
 

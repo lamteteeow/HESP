@@ -49,7 +49,7 @@ inline void migrateParticles(std::vector<ParticleDevice> &pds,
     for (size_t i = 0; i < src.n; ++i)
       merged.push(src.positions[i], src.velocities[i], src.masses[i],
                   src.radii[i], src.kn[i], src.gamma_n[i], src.gamma_t[i],
-                  src.mu[i]);
+                  src.mu[i], src.ids[i]);
   }
 
   // Re-split into N bins by x-coordinate
@@ -63,7 +63,8 @@ inline void migrateParticles(std::vector<ParticleDevice> &pds,
       ++g;
     new_hosts[g].push(merged.positions[i], merged.velocities[i],
                       merged.masses[i], merged.radii[i], merged.kn[i],
-                      merged.gamma_n[i], merged.gamma_t[i], merged.mu[i]);
+                      merged.gamma_n[i], merged.gamma_t[i], merged.mu[i],
+                      merged.ids[i]);
   }
 
   // Re-upload to GPUs (free old arrays, allocate fresh)

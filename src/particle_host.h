@@ -5,6 +5,7 @@
 #include "particle_device.cuh"
 #include "vec3.cuh"
 #include <algorithm>
+#include <cstddef>
 #include <cuda_runtime.h>
 #include <vector>
 
@@ -21,9 +22,10 @@ struct ParticleHost {
   size_t n = 0;
   std::vector<Vec3> positions, velocities;
   std::vector<float> masses, radii, kn, gamma_n, gamma_t, mu;
+  std::vector<int> ids;
 
   void push(Vec3 pos, Vec3 vel, float mass, float r, float _kn, float _gn,
-            float _gt, float _mu) {
+            float _gt, float _mu, int id = -1) {
     positions.push_back(pos);
     velocities.push_back(vel);
     masses.push_back(mass);
@@ -32,6 +34,7 @@ struct ParticleHost {
     gamma_n.push_back(_gn);
     gamma_t.push_back(_gt);
     mu.push_back(_mu);
+    ids.push_back(id);
     ++n;
   }
 
@@ -47,6 +50,7 @@ struct ParticleHost {
       gamma_n[i] = gamma_n[last];
       gamma_t[i] = gamma_t[last];
       mu[i] = mu[last];
+      ids[i] = ids[last];
     }
     positions.pop_back();
     velocities.pop_back();
@@ -56,6 +60,7 @@ struct ParticleHost {
     gamma_n.pop_back();
     gamma_t.pop_back();
     mu.pop_back();
+    ids.pop_back();
     --n;
   }
 
@@ -77,6 +82,7 @@ struct ParticleHost {
     CHECK_CUDA(cudaMalloc(&pd.d_gamma_t, (cap / 2) * sizeof(float)));
     CHECK_CUDA(cudaMalloc(&pd.d_mu, (cap / 2) * sizeof(float)));
     CHECK_CUDA(cudaMalloc(&pd.d_forces, (cap / 2) * sizeof(Vec3)));
+    CHECK_CUDA(cudaMalloc(&pd.d_ids, cap * sizeof(int)));
     CHECK_CUDA(cudaMalloc(&pd.d_cellHeads, total_cells * sizeof(int)));
     CHECK_CUDA(cudaMalloc(&pd.d_cellTails, cap * sizeof(int)));
     CHECK_CUDA(cudaMalloc(&pd.d_cellIndexes, cap * sizeof(int)));
@@ -94,6 +100,7 @@ struct ParticleHost {
     cp(pd.d_gamma_n, gamma_n.data(), n * sizeof(float));
     cp(pd.d_gamma_t, gamma_t.data(), n * sizeof(float));
     cp(pd.d_mu, mu.data(), n * sizeof(float));
+    cp(pd.d_ids, ids.data(), n * sizeof(int));
   }
 
   // Download owned particles (indices [0, pd.n)) from GPU.
@@ -108,6 +115,7 @@ struct ParticleHost {
     gamma_n.resize(n);
     gamma_t.resize(n);
     mu.resize(n);
+    ids.resize(n);
     if (n == 0)
       return;
     auto cp = [](void *h, const void *d, size_t bytes) {
@@ -121,6 +129,7 @@ struct ParticleHost {
     cp(gamma_n.data(), pd.d_gamma_n, n * sizeof(float));
     cp(gamma_t.data(), pd.d_gamma_t, n * sizeof(float));
     cp(mu.data(), pd.d_mu, n * sizeof(float));
+    cp(ids.data(), pd.d_ids, n * sizeof(int));
   }
 };
 
@@ -144,6 +153,8 @@ inline void freeParticleDevice(ParticleDevice &pd) {
   pd.d_mu = nullptr;
   CHECK_CUDA(cudaFree(pd.d_forces));
   pd.d_forces = nullptr;
+  CHECK_CUDA(cudaFree(pd.d_ids));
+  pd.d_ids = nullptr;
   CHECK_CUDA(cudaFree(pd.d_cellHeads));
   pd.d_cellHeads = nullptr;
   CHECK_CUDA(cudaFree(pd.d_cellTails));

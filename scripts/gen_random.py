@@ -16,14 +16,14 @@ KN       = 5000.0
 GAMMA_N  = 20.0
 GAMMA_T  = 10.0
 MU       = 0.3
-DT       = 0.0005   # 10x faster than default, still stable for kn=5000
+DT       = 0.0002   # time step (stable for kn=5000)
 
 # Particle ranges
 R_MIN    = 0.15
 R_MAX    = 0.3
 MASS_MIN = 0.5
 MASS_MAX = 1.5
-VEL_MAX  = 10.0         # max initial speed per component
+VEL_MAX  = 6.0          # max initial speed per component
 
 random.seed(SEED)
 
