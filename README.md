@@ -55,13 +55,28 @@ Usage: `./md2d <scene.json> [max_steps] [num_gpus] [vtk_interval]`
 
 ### Domain decomposition
 
-- **3D mode** (`make md3d`): N GPUs factored into near-square nx×ny grid
-  (e.g. 4→2×2, 6→3×2, 8→4×2). Each GPU owns a rectangular XY patch spanning
-  the full Z range, with up to 4 halo neighbors.
-- **2D mode** (`make`): X-only split into N equal slices. ny=1.
-- Halo width = `2 × r_max` — guarantees any particle that can contact a
-  neighbor across a boundary is present as a ghost on both sides.
-- Edge GPUs have no halo padding on the domain boundary side.
+**3D mode** (`make md3d`): N GPUs are factored into a near-square **nx×ny grid**.
+Each GPU owns a rectangular XY patch spanning the full Z range.
+
+| GPUs | Grid | Per-GPU neighbors |
+|---|---|---|
+| 1 | 1×1 | none |
+| 2 | 2×1 | L/R |
+| 3 | 3×1 | L/R |
+| 4 | 2×2 | L/R/B/T |
+| 5 | 5×1 | L/R |
+| 6 | 3×2 | L/R/B/T |
+| 7 | 7×1 | L/R |
+| 8 | 4×2 | L/R/B/T |
+
+Prime GPU counts (2,3,5,7) fall back to X-only split. Composite counts
+(4,6,8) use a 2D grid for better load balance.
+
+**2D mode** (`make`): X-only split into N equal slices (ny=1 always).
+
+- Halo width = `2 × r_max` — keeps a margin wide enough that any
+  cross-boundary contact is captured.
+- Edge GPUs have no halo padding on the domain-wall side.
 
 ### Memory layout
 
