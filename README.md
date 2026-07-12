@@ -3,9 +3,9 @@
 A spring-dashpot DEM (Discrete Element Method) simulator with **N-GPU domain
 decomposition**.
 
-In 3D mode (`make md3d`, `-DMD3D`), the domain is split into a **2D nx×ny grid**
-(factored from N GPUs). Each GPU has up to 4 neighbors (L/R/B/T) and exchanges
-halo particles across all four boundaries. 2D mode uses X-only split.
+In 3D mode (`make md3d`, `-DMD3D`), the domain is split into a **3D nx×ny×nz grid**
+(factored from N GPUs). Each GPU has up to 6 neighbors (±X, ±Y, ±Z) and exchanges
+halo particles in all directions. 2D mode uses X-only split.
 
 ## Build
 
@@ -36,7 +36,7 @@ Usage: `./md2d <scene.json> [max_steps] [num_gpus] [vtk_interval]`
 
 ### Per-step loop
 
-1. **Halo exchange** — each GPU collects boundary strips (X and Y) of width
+1. **Halo exchange** — each GPU collects boundary strips (X, Y, Z) of width
    `halo_width = 2 × r_max` and sends them to neighbors. Received strips are
    appended as read-only ghost particles after the owned array.
 2. **Cell assignment** — all particles (owned + halo) are inserted into a
@@ -51,28 +51,28 @@ Usage: `./md2d <scene.json> [max_steps] [num_gpus] [vtk_interval]`
    clamps z=0.
 5. **Particle migration** — if any particle crosses its owning region,
    all particles are downloaded, merged, re-split across the GPU grid
-   by (x, y) position, and re-uploaded.
+   by (x, y, z) position, and re-uploaded.
 
 ### Domain decomposition
 
-**3D mode** (`make md3d`): N GPUs are factored into a near-square **nx×ny grid**.
-Each GPU owns a rectangular XY patch spanning the full Z range.
+**3D mode** (`make md3d`): N GPUs are factored into a near-cube **nx×ny×nz grid**.
+Each GPU owns a 3D sub-volume.
 
 | GPUs | Grid | Per-GPU neighbors |
 |---|---|---|
-| 1 | 1×1 | none |
-| 2 | 2×1 | L/R |
-| 3 | 3×1 | L/R |
-| 4 | 2×2 | L/R/B/T |
-| 5 | 5×1 | L/R |
-| 6 | 3×2 | L/R/B/T |
-| 7 | 7×1 | L/R |
-| 8 | 4×2 | L/R/B/T |
+| 1 | 1×1×1 | none |
+| 2 | 2×1×1 | ±X |
+| 3 | 3×1×1 | ±X |
+| 4 | 2×2×1 | ±X, ±Y |
+| 5 | 5×1×1 | ±X |
+| 6 | 3×2×1 | ±X, ±Y |
+| 7 | 7×1×1 | ±X |
+| 8 | 2×2×2 | ±X, ±Y, ±Z |
 
-Prime GPU counts (2,3,5,7) fall back to X-only split. Composite counts
-(4,6,8) use a 2D grid for better load balance.
+Prime GPU counts fall back to X-only split. Composite counts use 2D or
+full 3D decomposition for best load balance.
 
-**2D mode** (`make`): X-only split into N equal slices (ny=1 always).
+**2D mode** (`make`): X-only split into N equal slices.
 
 - Halo width = `2 × r_max` — keeps a margin wide enough that any
   cross-boundary contact is captured.
@@ -145,11 +145,11 @@ load them all as a ParaView time series.
 | File | Role |
 |---|---|
 | `main.cu` | Entry point; simulation loop |
-| `domain.h` | `Domain` struct + `buildDomains()` for 2D grid decomposition |
+| `domain.h` | `Domain` struct + `buildDomains()` for N-GPU 3D grid decomposition |
 | `particle_device.cuh` | GPU pointer struct (owned + halo layout) |
 | `particle_host.h` | CPU buffer; `upload()` / `download()` / `freeParticleDevice()` |
-| `halo_exchange.h` | `collectHalo()` / `uploadHalo()` / `exchangeHalos()` — N-GPU, XY |
-| `migration.h` | `migrateParticles()` — full CPU round-trip redistribution, XY grid |
+| `halo_exchange.h` | `collectHalo()` / `uploadHalo()` / `exchangeHalos()` — N-GPU, ±X±Y±Z |
+| `migration.h` | `migrateParticles()` — full CPU round-trip redistribution, XYZ grid |
 | `force_kernels.cuh` | `computeContactForces` kernel (spring-dashpot DEM) |
 | `integration.cuh` | `integrate` kernel (symplectic Euler, reflective walls) |
 | `assign_cells.cuh` | `assignCell` kernel + `computeCellIndex` |

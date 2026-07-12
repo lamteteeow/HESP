@@ -4,9 +4,9 @@
 
 A GPU-accelerated 2D/3D molecular dynamics / DEM simulator with **N-GPU domain decomposition**.
 
-In 3D mode (`make md3d`, `-DMD3D`), the domain is split into a **2D nx×ny grid**
-(factored from N GPUs). Each GPU has up to 4 neighbors (L/R/B/T) and exchanges
-halo particles across all four boundaries. 2D mode uses X-only split.
+In 3D mode (`make md3d`, `-DMD3D`), the domain is split into a **3D nx×ny×nz grid**
+(factored from N GPUs). Each GPU has up to 6 neighbors (±X, ±Y, ±Z) and exchanges
+halo particles across all three axes. 2D mode uses X-only split.
 
 At each step:
 1. **Halo exchange** — each GPU sends boundary strips (X and Y) to neighbors and receives their strips as ghost/read-only particles.
