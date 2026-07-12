@@ -117,6 +117,8 @@ Output goes to `output/<scene>_<steps>/`. Open in ParaView; use "Glyph" filter w
    wireframe.
 3. Click `Apply`.
 4. Add a `Glyph` filter, set glyph type to `Sphere`, scale by the `radius` scalar.
+   In the Glyph properties, set **Masking → Glyph Mode** to `All Points`
+   to avoid radius interpolation artifacts.
 5. Click `Play` to animate.
 
 ## JSON scene format

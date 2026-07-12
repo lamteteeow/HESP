@@ -57,6 +57,19 @@ make
 Generate scenes with the bundled scripts:
 
 ```bash
-python3 scripts/gen_random.py > scenes/my_scene.json    # random particles
-python3 scripts/gen_lattice.py > scenes/lattice.json    # hexagonal lattice
+python3 scripts/gen_random.py > scenes/my_scene.json    # 2D random
+python3 scripts/gen_lattice.py > scenes/lattice.json    # 2D lattice
+python3 scripts/gen_random3d.py > scenes/cube.json      # 3D random
 ```
+
+## Visualization
+
+1. Download the `output/` directory to your local machine.
+2. Open ParaView, `File → Open` → select all `.vtk` files in the output
+   directory (they load as a time series). Include `domain_boundary.vtk`
+   to see the domain wireframe and halo regions.
+3. Click `Apply`.
+4. Add a `Glyph` filter, set **Glyph Type** to `Sphere`, scale by the
+   `radius` scalar. In the Glyph properties, set **Masking → Glyph Mode**
+   to `All Points` to avoid radius interpolation artifacts.
+5. Click `Play` to animate.
