@@ -51,11 +51,16 @@ void Benchmark::init(int num_gpus, const std::string &scene, long max_steps) {
   }
 
   // Open CSV
-  csv_path_ = "benchmark/bench_" + scene + "_" + std::to_string(max_steps) + ".csv";
+  csv_path_ = "benchmark/bench_" + scene + "_" + std::to_string(max_steps)
+            + "_gpu" + std::to_string(num_gpus) + ".csv";
   csv_.open(csv_path_);
-  if (!csv_)
-    fprintf(stderr, "Warning: cannot open %s for benchmark CSV\n",
+  if (!csv_) {
+    fprintf(stderr, "\n*** WARNING: cannot open %s for benchmark CSV\n",
             csv_path_.c_str());
+    fprintf(stderr, "*** Benchmarks will only appear in terminal output.\n\n");
+  } else {
+    printf("Benchmark CSV → %s\n", csv_path_.c_str());
+  }
 }
 
 // ── start / stop ────────────────────────────────────────────────────────────
@@ -256,6 +261,7 @@ void Benchmark::endStep(long step, int bench_interval,
     mean /= num_gpus_;
     double var = (num_gpus_ > 1) ? (m2 / num_gpus_ - mean * mean) : 0.0;
     csv_ << "," << std::fixed << std::setprecision(1) << var << "\n";
+    csv_.flush();  // ensure data hits disk even if crash later
   }
 }
 
