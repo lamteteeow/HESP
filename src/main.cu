@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <chrono>
 #include <cuda_runtime.h>
 #include <iostream>
 #include <stdexcept>
@@ -6,6 +7,7 @@
 #include <vector>
 
 #include "assign_cells.cuh"
+#include "benchmark.h"
 #include "check_cuda.h"
 #include "domain.h"
 #include "energy_diagnostics.cuh"
@@ -54,11 +56,16 @@ static ParticleHost toHost(const ParticleData &src, int &id_offset) {
 int main(int argc, char **argv) {
   if (argc < 2) {
     std::cerr << "Usage: " << argv[0]
-              << " <scene.json> [max_steps] [num_gpus] [vtk_interval]\n";
+              << " <scene.json> [max_steps] [num_gpus] [vtk_interval]"
+                 " [bench_interval]\n";
     return 1;
   }
   const long max_steps = (argc > 2) ? std::stol(argv[2]) : 100000;
-  const int steps_per_frame = (argc > 4) ? std::stoi(argv[4]) : 20;
+  const int  steps_per_frame = (argc > 4) ? std::stoi(argv[4]) : 20;
+  const int  bench_interval  = (argc > 5) ? std::stoi(argv[5]) : 100;
+
+  // Steps to skip at start for warm-up (cold caches, lazy init)
+  constexpr int WARMUP_STEPS = 10;
 
   try {
 
@@ -168,16 +175,28 @@ int main(int argc, char **argv) {
     }
 
     // ------------------------------------------------------------------ //
+    // 5.5  Benchmark init
+    // ------------------------------------------------------------------ //
+    const std::string scene = sceneName(argv[1]);
+    Benchmark bench;
+    bench.init(num_gpus, scene, max_steps);
+
+    // ------------------------------------------------------------------ //
     // 6.  Main simulation loop
     // ------------------------------------------------------------------ //
     constexpr dim3 BLOCK(256);
-    const std::string scene = sceneName(argv[1]);
     int frame = 0;
 
     for (long step = 0; step < max_steps; ++step) {
+      const bool warm = (step >= WARMUP_STEPS);
+
+      if (warm) bench.beginStep();
 
       // --- Halo exchange: populate ghost particles on each GPU ---
+      if (warm) bench.startHost(Benchmark::HALO_PACK);
       int ghosts = exchangeHalos(pds, doms, halo_bufs, BLOCK);
+      if (warm) bench.stopHost(Benchmark::HALO_PACK);
+      if (warm) bench.recordGhosts(ghosts);
 
       // --- Assign cells (owned + halo) on each GPU ---
       for (int g = 0; g < num_gpus; ++g) {
@@ -187,11 +206,13 @@ int main(int argc, char **argv) {
             cudaMemset(pds[g].d_cellHeads, -1, dom.total_cells * sizeof(int)));
         if (pds[g].n_total > 0) {
           dim3 grid((pds[g].n_total + BLOCK.x - 1) / BLOCK.x);
+          if (warm) bench.start(Benchmark::ASSIGN, g);
           assignCell<<<grid, BLOCK>>>(pds[g].n_total, pds[g].d_positions,
                                       dom.num_cells, dom.local_min,
                                       dom.cell_size, pds[g].d_cellHeads,
                                       pds[g].d_cellTails, pds[g].d_cellIndexes);
           CHECK_LAST_CUDA();
+          if (warm) bench.stop(Benchmark::ASSIGN, g);
         }
       }
 
@@ -200,48 +221,66 @@ int main(int argc, char **argv) {
       for (int g = 0; g < num_gpus; ++g) {
         CHECK_CUDA(cudaSetDevice(g));
         if (pds[g].n > 0) {
-          int *d_cnt = nullptr;
-          CHECK_CUDA(cudaMalloc(&d_cnt, sizeof(int)));
-          CHECK_CUDA(cudaMemset(d_cnt, 0, sizeof(int)));
+          // Persistent contact counter (allocated once at startup)
+          CHECK_CUDA(cudaMemset(pds[g].d_contact_count, 0, sizeof(int)));
           dim3 grid((pds[g].n + BLOCK.x - 1) / BLOCK.x);
+          if (step == 1) printf("DEBUG step=1 gpu=%d d_contact_count=%p d_nb=%p d_forces=%p\n",
+                               g, (void*)pds[g].d_contact_count,
+                               (void*)d_nb[g], (void*)pds[g].d_forces);
+          if (warm) bench.start(Benchmark::FORCE, g);
           computeContactForces<<<grid, BLOCK>>>(
               pds[g].n, pds[g].n_total, pds[g].d_positions, pds[g].d_velocities,
               pds[g].d_forces, pds[g].d_masses, pds[g].d_radii, pds[g].d_kn,
               pds[g].d_gamma_n, pds[g].d_gamma_t, pds[g].d_mu,
               pds[g].d_cellHeads, pds[g].d_cellTails, pds[g].d_cellIndexes,
-              d_nb[g], cfg.gravity, d_cnt);
+              d_nb[g], cfg.gravity, pds[g].d_contact_count);
           CHECK_LAST_CUDA();
+          if (warm) bench.stop(Benchmark::FORCE, g);
           int cnt = 0;
-          CHECK_CUDA(cudaMemcpy(&cnt, d_cnt, sizeof(int), cudaMemcpyDeviceToHost));
-          CHECK_CUDA(cudaFree(d_cnt));
+          CHECK_CUDA(cudaMemcpy(&cnt, pds[g].d_contact_count, sizeof(int),
+                                cudaMemcpyDeviceToHost));
           step_contacts += cnt;
         }
       }
+      if (warm) bench.recordContacts(step_contacts);
 
       // --- Integrate (owned particles only) ---
       for (int g = 0; g < num_gpus; ++g) {
         CHECK_CUDA(cudaSetDevice(g));
         if (pds[g].n > 0) {
           dim3 grid((pds[g].n + BLOCK.x - 1) / BLOCK.x);
+          if (warm) bench.start(Benchmark::INTEGRATE, g);
           integrate<<<grid, BLOCK>>>(cfg.dt, pds[g].n, pds[g].d_positions,
                                      pds[g].d_velocities, pds[g].d_forces,
                                      pds[g].d_masses, pds[g].d_radii,
                                      cfg.domain_min, cfg.domain_max);
           CHECK_LAST_CUDA();
+          if (warm) bench.stop(Benchmark::INTEGRATE, g);
         }
       }
 
       // Synchronize all GPUs before migration / output
+      if (warm) bench.startHost(Benchmark::SYNC);
       for (int g = 0; g < num_gpus; ++g) {
         CHECK_CUDA(cudaSetDevice(g));
         CHECK_CUDA(cudaDeviceSynchronize());
       }
+      if (warm) bench.stopHost(Benchmark::SYNC);
 
       // --- Particle migration ---
-      migrateParticles(pds, doms, global.n);
+      Benchmark *bp = warm ? &bench : nullptr;
+      migrateParticles(pds, doms, global.n, bp);
+      // Record whether migration crossed (inferred from download time > 0
+      // inside migrateParticles — we track via the bench pointer).
+      // For now we count it in bench; a simple heuristic: if any GPU's n
+      // changed since last VTK frame we could track, but the bench
+      // auto-detects from MIG_DOWNLOAD time.  We rely on migrateParticles
+      // having called bench->startHost/stopHost.
 
       // --- VTK output ---
       if (step % steps_per_frame == 0) {
+        if (warm) bench.startHost(Benchmark::VTK);
+
         std::vector<Vec3> pos, vel;
         std::vector<float> rad;
         std::vector<int> pid, gpu_owner;
@@ -278,7 +317,6 @@ int main(int argc, char **argv) {
         }
 
         // Compute border fraction: 0 = interior, 1 = at halo edge.
-        // Only counts boundaries where a neighbor GPU actually exists.
         std::vector<float> border(pos.size(), 0.0f);
         for (size_t i = 0; i < pos.size(); ++i) {
           const Domain &d = doms[gpu_owner[i]];
@@ -330,11 +368,21 @@ int main(int argc, char **argv) {
         for (int g = 0; g < num_gpus; ++g)
           printf("  GPU%d:%zu", g, pds[g].n);
         printf("\n");
+
+        if (warm) bench.stopHost(Benchmark::VTK);
       }
+
+      // --- End-of-step benchmark ---
+      if (warm) bench.endStep(step, bench_interval, pds);
     }
 
     // ------------------------------------------------------------------ //
-    // 7.  Cleanup
+    // 7.  Benchmark final summary
+    // ------------------------------------------------------------------ //
+    bench.printFinal();
+
+    // ------------------------------------------------------------------ //
+    // 8.  Cleanup
     // ------------------------------------------------------------------ //
     for (int g = 0; g < num_gpus; ++g) {
       CHECK_CUDA(cudaSetDevice(g));

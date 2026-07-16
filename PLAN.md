@@ -4,47 +4,101 @@
 
 **Benchmark first, optimize second, verify third.** Every change must be
 measured against a recorded baseline to prove its impact. No optimization
-ships without a before/after comparison.
+ships without a before/after comparison. Optimizations in this document are
+**hypotheses** — the actual work is determined by benchmarks, not by this plan.
 
 ---
 
-## 1. Benchmarking Framework  <- MUST COME FIRST
+## 1. Pre-Benchmarking Fixes  <- MUST COME FIRST
 
-### Why First
+Before any benchmarking, fix a known problem in the hot path that would
+contaminate all measurements:
+
+### 1.1 Persistent contact counter
+
+`main.cu` currently allocates and frees a 4-byte integer **every step**
+(lines 203-216):
+
+```cpp
+int *d_cnt = nullptr;
+cudaMalloc(&d_cnt, sizeof(int));   // ALLOC EVERY STEP
+// ... kernel ...
+cudaFree(d_cnt);                    // FREE EVERY STEP
+```
+
+`cudaMalloc` can trigger heavyweight driver synchronisation. Replace with a
+persistent counter allocated once at startup (add `int *d_contact_count` to
+`ParticleDevice`, allocate in `upload()`, memset to 0 each step, free in
+`freeParticleDevice()`).
+
+### 1.2 Separate VTK path from benchmarked path
+
+VTK writes dominate step time (downloading all particles, file I/O). When
+benchmarking, use a large `vtk_interval` (e.g., 10× `max_steps`) to suppress
+VTK entirely. Benchmark output should report VTK cost **separately** from the
+per-step average so it doesn't distort optimisation targets.
+
+---
+
+## 2. Benchmarking Framework
+
+### 2.1 Why First
+
 We need to know:
 - **Where time is actually spent** (not where we think it's spent).
 - **How often migration actually triggers** with real workloads.
-- **What the GPU-GPU halo exchange actually costs** vs. the old CPU approach.
+- **What the GPU-GPU halo exchange actually costs**.
 - **Load imbalance** across GPUs for real particle distributions.
 
-Without this, we're optimizing blind.
+Without this, we're optimising blind.
 
-### Metrics
+### 2.2 Multi-GPU Timing Strategy
 
-| Metric | Source | Unit |
-|---|---|---|
-| Step time (total) | `cudaEvent` wall clock | ms |
-| Halo - pack kernel | `cudaEvent` around `packHaloParticles` | ms |
-| Halo - `cudaMemcpyPeer` | `cudaEvent` around all peer copies | ms |
-| Halo - total | Sum of above | ms |
-| Migration - GPU->CPU download | `cudaEvent` around `cudaMemcpyDeviceToHost` | ms |
-| Migration - CPU merge+split | `std::chrono` host timer | ms |
-| Migration - CPU->GPU upload | `cudaEvent` around `cudaMemcpyHostToDevice` | ms |
-| Migration - total | Sum of above | ms |
-| Force kernel | `cudaEvent` around `computeContactForces` | ms |
-| Cell assignment | `cudaEvent` around `assignCell` | ms |
-| Integration | `cudaEvent` around `integrate` | ms |
-| Sync | `cudaEvent` around `cudaDeviceSynchronize` | ms |
-| VTK output (when triggered) | `cudaEvent` + host timer | ms |
-| Particles per GPU | `pds[g].n` | count |
-| Migration triggered? | bool per step | yes/no |
-| Ghost particles transferred | `exchangeHalos()` return value | count |
-| Contact pairs evaluated | atomic counter in force kernel | count |
-| Load variance | `Var(n_g)` across GPUs | count^2 |
+CUDA events are per-device. Timing across multiple GPUs requires care:
 
-### Output Format (every `bench_interval` steps)
+- **Per-metric, per-GPU** event pairs: `cudaEvent_t start[METRIC][MAX_GPU]`,
+  `stop[METRIC][MAX_GPU]`. Record on the device doing the work.
+- **Wall-clock host timer** (`std::chrono::steady_clock`) around the entire
+  step loop for end-to-end step time. This is the ground truth.
+- **Critical-path semantics**: where GPUs must synchronise (before migration,
+  before VTK), report the **max** across GPUs, not the sum. Where GPUs work
+  independently, report per-GPU times.
+- **`Sync` metric**: a `cudaDeviceSynchronize` on the straggler GPU measures
+  idle time of the **host**, not sync overhead. Sync time is `max_gpu_finish -
+  min_gpu_finish`. Track via host timer between the last kernel launch on each
+  GPU and its synchronisation return.
+- **Warm-up**: skip the first N steps (default 10) to avoid cold-cache and
+  lazy-initialisation artefacts.
+
+### 2.3 Metrics
+
+| Metric | Source | Unit | Aggregation |
+|---|---|---|---|
+| Step time (total, end-to-end) | `std::chrono` host timer | ms | — |
+| Halo - pack kernel | `cudaEvent` per GPU | ms | max across GPUs |
+| Halo - `cudaMemcpyPeer` | `cudaEvent` per GPU | ms | max across GPUs |
+| Halo - total | Sum of above | ms | — |
+| Force kernel | `cudaEvent` per GPU | ms | max across GPUs |
+| Cell assignment | `cudaEvent` per GPU | ms | max across GPUs |
+| Integration | `cudaEvent` per GPU | ms | max across GPUs |
+| Sync (GPU straggler wait) | host timer | ms | — |
+| Migration - GPU→CPU download | `cudaEvent` per GPU | ms | sum across GPUs |
+| Migration - CPU merge+split | `std::chrono` host timer | ms | — |
+| Migration - CPU→GPU upload | `cudaEvent` per GPU | ms | sum across GPUs |
+| Migration - total | Sum of above | ms | — |
+| VTK output (when triggered) | `cudaEvent` + host timer | ms | — |
+| Particles per GPU | `pds[g].n` | count | — |
+| Migration triggered? | bool per step | yes/no | — |
+| Ghost particles transferred | `exchangeHalos()` count × 2 (send+recv) | count | — |
+| Contact pairs evaluated | persistent atomic counter | count | — |
+| Load variance | `Var(n_g)` across GPUs | count² | — |
+
+### 2.4 Output Format
+
+**Per-step** (every `bench_interval` steps, human-readable):
 ```
 === step 1000 =========================================
+  wall        2.55 ms
   halo        0.12 ms  (pack=0.08  peer=0.04  ghosts=234)
   assign      0.05 ms
   force       0.45 ms  (contacts=12345)
@@ -53,318 +107,496 @@ Without this, we're optimizing blind.
   migrate     0.62 ms  (download=0.30  merge=0.02  upload=0.30) CROSSED
   vtk         2.10 ms  (frame=50)
   --------------------------
-  total       3.38 ms
   particles   GPU0:1024 GPU1:1023  var=0.5
 ```
 
-And a **final summary** at exit:
+**Per-step machine-readable** (appended to `bench_<scene>.csv`):
+```csv
+step,wall_ms,halo_pack_ms,halo_peer_ms,halo_ghosts,assign_ms,force_ms,force_contacts,integrate_ms,sync_ms,mig_dl_ms,mig_merge_ms,mig_ul_ms,mig_crossed,vtk_ms,vtk_frame,n_gpu0,n_gpu1,n_gpu2,n_gpu3,load_var
+1000,2.55,0.08,0.04,234,0.05,0.45,12345,0.03,0.01,0.30,0.02,0.30,1,2.10,50,1024,1023,1022,1025,0.5
+```
+
+**Final summary** at exit:
 ```
 === FINAL =============================================
-  steps:         10000
-  avg step:      2.15 ms
-  avg halo:      0.11 ms  (5.1%)
-  avg force:     0.44 ms  (20.5%)
-  avg migrate:   0.03 ms  (1.4%)   [triggered 12/10000 steps]
-  avg vtk:       2.10 ms  (97.7%)  [every 20 steps]
-  migrations:    12
-  contacts/step: ~12000
-  particles/GPU: mean=1023  min=980  max=1067  var=+/-43
+  steps:              10000
+  avg wall:           2.15 ms
+  avg halo:           0.11 ms  (5.1%)
+  avg force:          0.44 ms  (20.5%)
+  avg migrate:        0.03 ms  (1.4%)   [triggered 12/10000]
+  avg vtk (amort):    0.11 ms  (5.1%)   [triggered every 20 steps]
+  avg vtk (per-out):  2.10 ms
+  avg contacts/step:  ~12000
+  particles/GPU:      mean=1023  min=980  max=1067  var=+/-43
 ```
 
-### Implementation
-- `src/benchmark.h` - `BenchStats` struct with `cudaEvent_t` pairs per metric,
-  running min/max/avg accumulators, `printStep()` and `printFinal()`.
-- `main.cu` - wrap each logical block with `BenchStats::start("halo")` /
-  `BenchStats::stop("halo")`. Call `printStep()` every `bench_interval` steps.
-  Call `printFinal()` before `return 0`.
-- CLI flag: `bench_interval` via 5th argument or compile-time default (100).
+**Note on percentages**: percentages in the final summary use the **amortised**
+average (total time / total steps), so VTK cost is spread across all steps.
+This gives an accurate picture of where total runtime goes. Per-output VTK cost
+is also reported separately.
 
-### Files
+### 2.5 Implementation
+
+- `src/benchmark.h` — `BenchStats` struct with per-GPU `cudaEvent_t` pairs,
+  running min/max/avg accumulators, `start(metric, gpu)`, `stop(metric, gpu)`,
+  `printStep()`, `printFinal()`. Host-wall timer independent of CUDA events.
+  CSV output to `bench_<scene>.csv`.
+- `src/benchmark.cu` — implementation (non-trivial methods).
+- `main.cu` — wrap each logical block with `BenchStats::start` / `stop`.
+  Call `printStep()` every `bench_interval` steps. Call `printFinal()` before
+  `return 0`.
+- CLI: `bench_interval` as 5th argument (default 100). Set `bench_interval=0`
+  to disable step-level output (final summary only).
+
+### 2.6 Files
 - `src/benchmark.h` (new)
+- `src/benchmark.cu` (new)
 - `src/main.cu` (wrap sections)
+- `src/particle_device.cuh` (add `d_contact_count` field)
+- `src/particle_host.h` / `src/particle_host.cu` (allocate/free persistent counter)
+- `Makefile` (add new `.cu` files)
 
 ---
 
-## 2. GPU-side Crossing Check (Cheap Migration Guard)
+## 3. GPU-side Crossing Check (Cheap Migration Guard)
 
-### Current Behavior (to be measured by step 1)
+### 3.1 Current Behavior
+
 Every step:
 ```
-download ALL particles GPU->CPU  [measured: X ms]
+download ALL particles GPU→CPU  [measured: X ms per GPU]
 check for crossing on CPU        [measured: Y ms]
-if none crossed -> return         [most steps]
-else -> merge + split + upload   [rare, measured: Z ms]
+if none crossed → return         [most steps]
+else → merge + split + upload   [rare, measured: Z ms]
 ```
 
-### Hypothesis
-- Migration triggers on << 1% of steps for typical simulations.
-- The download dominates migration cost (O(N) PCIe transfer).
-- A GPU-side atomic-flag check costs O(1) PCIe transfer (4 bytes per GPU).
+The download is O(N) PCIe transfer and dominates idle-step migration cost.
 
-### Expected Impact
+### 3.2 Hypothesis
+
+A GPU-side atomic-flag check reduces idle-step migration cost from O(N) PCIe
+to O(1) PCIe (4 bytes per GPU). Since the download is already paid on crossing
+steps, the check adds negligible overhead to those steps.
+
+### 3.3 Expected Impact
+
 | Metric | Before | After | Delta |
 |---|---|---|---|
-| Migration time (idle step) | X ms (download) | ~4 us (flag copy) | -99%+ |
-| Migration time (crossing step) | X+Y+Z ms | X+Y+Z ms | 0% (unchanged) |
-| Avg migration per step | ~X ms | ~0 ms | -99%+ |
+| Migration time (idle step) | X ms (download all) | ~4 µs (flag copy) | -99%+ |
+| Migration time (crossing step) | X+Y+Z ms | X+Y+Z + ε ms | ~0% |
+| Avg migration per step | ~X ms | ~(X × trigger_rate) ms | -99%+ for low trigger rates |
 
-### Implementation
-1. Add `int *d_mig_flag` to `ParticleDevice` (allocated once at startup,
-   capacity=1 int per GPU).
-2. Add `checkMigration` kernel (no atomics - just write `1`; idempotent).
-3. In `migrateParticles()`:
+### 3.4 Implementation
+
+1. Add `int *d_mig_flag` to `ParticleDevice` — one int per GPU, allocated at
+   startup, zeroed each step.
+2. Add `checkMigration` kernel: each thread checks whether its owned particle
+   is outside `owned_min`/`owned_max`; if so, writes `1` to `d_mig_flag`
+   (idempotent — no atomics needed since all threads write the same value).
+3. Reset `d_mig_flag` to 0 via `cudaMemset` before each kernel launch.
+4. In `migrateParticles()`:
    ```
    launch checkMigration on each GPU
-   cudaMemcpy d_mig_flag -> host (4 bytes per GPU)
-   if all flags == 0 -> return (no download)
-   // else fall through to existing code
+   cudaMemcpy d_mig_flag → host flag (4 bytes per GPU)
+   if all flags == 0 → return
+   // else fall through to existing download + merge + upload
    ```
+5. Pass `owned_min`/`owned_max` as kernel arguments (not `__constant__`
+   memory) so they work correctly with dynamic decomposition (Section 4).
 
-### Files
-- `src/migration.h`
-- `src/particle_device.cuh` (add `d_mig_flag` field)
+### 3.5 Decision: Always Do This
 
----
+This optimisation costs ~20 lines of code, has negligible runtime overhead
+(a few µs of kernel launch + 4-byte D2H copy per GPU), and its benefit scales
+with N. There is no scenario where it makes things worse. **Always implement
+after benchmarking baseline.**
 
-## 3. Dynamic Domain Decomposition
-
-### Current Behavior (to be measured by step 1)
-- Domains are equal geometric X-slices.
-- If particles cluster (e.g., settling to bottom, grouping at center), some GPUs
-  do more work.
-- Load variance = `Var(n_g)` - measured by benchmarking.
-
-### Hypothesis
-- Load imbalance causes force kernel to be bottlenecked by the busiest GPU
-  (all GPUs must sync before migration + VTK).
-- Dynamic rebalancing reduces the max `n_g`, cutting force computation time
-  by up to `(max_n - mean_n) / max_n`.
-
-### Expected Impact
-| Metric | Before | After | Delta |
-|---|---|---|---|
-| Max particles per GPU | N/num_gpus + delta | =~ N/num_gpus | ~delta reduction |
-| Force kernel time | limited by max GPU | limited by avg GPU | up to delta/N% reduction |
-| Load variance | measured | -> 0 | |
-
-### Algorithm (2D X-only)
-1. Every `rebalance_interval` steps (default 100):
-   - Collect `n_g` per GPU (already available, no extra work).
-   - Compute new boundaries:
-     ```
-     target_per_gpu = total_N / num_gpus
-     cumulative = 0
-     for g in 0..num_gpus-2:
-         cumulative += n_g
-         // Move boundary to equalize cumulative vs. g*target
-         new_boundary[g] = interpolate(...)
-     ```
-   - Apply to `Domain` structs: recalculate `owned_min/max`, `local_min/max`,
-     `num_cells`, `total_cells`.
-   - If `total_cells` changed: reallocate cell arrays.
-2. Trigger migration to redistribute particles per new boundaries.
-
-### Limitations
-- 3D grid (MD3D): adjust X boundaries within each YZ-column only. Full 3D
-  repartitioning is deferred.
-
-### Files
-- `src/domain.h` - `rebalanceDomains()` function
-- `src/main.cu` - trigger + stats
+### 3.6 Files
+- `src/migration.h` / `src/migration.cu` — add GPU guard
+- `src/particle_device.cuh` — add `d_mig_flag` field
+- `src/particle_host.h` / `src/particle_host.cu` — allocate/free flag
+- `src/pack_migrate.cuh` (new) — `checkMigration` kernel
 
 ---
 
-## 4. Full GPU-side Migration (Pack + cudaMemcpyPeer)
+## 4. Dynamic Domain Decomposition
 
-### Prerequisites
-- Steps 1 (benchmarking) - to verify GPU migration is actually faster.
-- Step 2 (crossing check) - already eliminates downloads on idle steps.
-- Step 3 (dynamic decomposition) - reduces migration frequency further.
+### 4.1 Current Behavior (to be measured by Section 2)
 
-### Hypothesis
-When migration DOES trigger, the current CPU round-trip (download -> merge ->
-upload) still costs O(N) PCIe transfers. A GPU-side approach using the same
-pattern as `halo_exchange.h` (pack kernel + `cudaMemcpyPeer`) keeps data
-on-device.
+- Domains are equal geometric slices.
+- If particles cluster, some GPUs do more work → force kernel bottlenecked by
+  the busiest GPU (all GPUs sync before migration + VTK).
+- Load variance = `Var(n_g)` — measured by benchmarking.
 
-### Expected Impact
+### 4.2 Hypothesis
+
+Dynamic rebalancing reduces `max(n_g)`, cutting force computation time by up
+to `(max_n - mean_n) / max_n`. Impact is proportional to load imbalance.
+
+### 4.3 Algorithm
+
+**Trigger**: every `rebalance_interval` steps (default 100), if load variance
+exceeds a threshold (e.g., `max_n > 1.2 × mean_n`). Use hysteresis: don't
+rebalance again until variance has been above threshold for 2 consecutive
+checks, and don't rebalance if the improvement would be < 5%.
+
+**2D X-only (md2d)**:
+1. Collect `n_g` per GPU (already available).
+2. Sort particle positions on each GPU and gather to host (required for
+   precise boundary placement — this is the main cost).
+3. Compute new boundaries via **binary search** over the global sorted
+   position list: find X coordinates where the cumulative particle count
+   crosses `g × target_per_gpu` for `g = 1..num_gpus-1`.
+4. Apply to `Domain` structs: update `owned_min.x`/`owned_max.x`,
+   recalculate `local_min`/`local_max`, `num_cells`, `total_cells`.
+5. Allocate cell arrays for the **maximum possible** `total_cells` at startup
+   to avoid mid-run `cudaFree`/`cudaMalloc`. If the new `total_cells` still
+   fits within the pre-allocated size, reuse the buffers.
+6. Recompute and re-upload the cell neighborhood table (`d_nb`) only if
+   `total_cells` actually grew beyond the pre-allocated maximum.
+7. Trigger migration to redistribute particles per new boundaries.
+
+**3D (MD3D, deferred)**: adjust X boundaries within each YZ-column. Since
+halo exchange assumes axis-aligned rectangular owned regions, boundaries
+must be aligned across columns. This requires a global constraint that
+limits flexibility. Full 3D repartitioning is future work.
+
+### 4.4 Expected Impact
+
 | Metric | Before | After | Delta |
 |---|---|---|---|
-| Migration (crossing step) | X+Y+Z ms (CPU) | ~H ms (GPU) | ~(1 - H/N)x reduction |
+| Max particles per GPU | mean + delta | ≈ mean | ~delta reduction |
+| Force kernel time | limited by max | limited by avg | up to delta/N % |
+| Load variance | measured | → near 0 | |
+
+### 4.5 Decision Gate
+
+**Only implement if** benchmarks from Section 2 show load variance
+`max(n_g) / mean(n_g) > 1.15` for a significant fraction of steps.
+
+### 4.6 Interaction with Section 3
+
+Dynamic decomposition **increases** migration frequency (moving boundaries
+forces particle redistribution). Section 3 (GPU crossing check) should be
+implemented **before** Section 4 to keep idle-step migration cost low.
+
+### 4.7 Files
+- `src/domain.h` / `src/domain.cu` — `rebalanceDomains()` function
+- `src/main.cu` — trigger + stats
+
+---
+
+## 5. Full GPU-side Migration (Pack + cudaMemcpyPeer)
+
+### 5.1 Prerequisites
+
+- Section 2 (benchmarking) — to verify GPU migration is actually faster.
+- Section 3 (crossing check) — already eliminates downloads on idle steps.
+- Section 4 (dynamic decomposition) — may affect migration patterns.
+
+### 5.2 Hypothesis
+
+When migration DOES trigger, the current CPU round-trip still costs O(N)
+PCIe transfers. A GPU-side approach using pack kernels + `cudaMemcpyPeer`
+keeps data on-device, transferring only particles that actually crossed.
+
+### 5.3 Expected Impact
+
+| Metric | Before | After | Delta |
+|---|---|---|---|
+| Migration (crossing step) | O(N) PCIe | O(H) GPU-GPU | ~(1 − H/N)× reduction |
 | GPU memory | capacity | capacity + pack bufs | + O(N) temp |
 
 Where H = number of particles that actually crossed (usually << N).
 
-### Algorithm (Double-Buffer Approach)
-1. **Pack migrated-out** per GPU per direction -> 6 output buffers (like
-   `packHaloParticles` but checking `owned_min`/`owned_max`).
-2. **cudaMemcpyPeer** each direction's packed strip -> target GPU's receive buffer.
-3. **Pack stayers** into a contiguous temp buffer (atomic counter, same kernel
-   pattern).
-4. **Append migrated-in** from each neighbor's receive buffer after stayers.
-5. **Swap pointers** (double-buffer - already have `capacity = 2*total_N`,
-   use the second half as temp).
+### 5.4 Algorithm Outline
 
-### Complexity / Risk
-- Most complex change in this plan. Introduces new packing kernels and pointer
-  management.
-- Only worth doing if step 2 + step 3 still leave measurable migration cost.
-- Defer until benchmarks from step 1 prove it's needed.
+1. **Pack migrated-out**: for each GPU, pack particles that left its owned
+   region into per-target-GPU output buffers. Unlike halo (6 directions
+   based on neighbor topology), migration sends directly to the correct
+   destination GPU — up to `num_gpus − 1` output buffers per source GPU.
+2. **cudaMemcpyPeer** each packed buffer to the target GPU's receive buffer.
+3. **Important**: `gamma_t` and `mu` must be transferred (unlike halo
+   exchange where they can fall back to particle-i values). These are
+   owned-only arrays (`capacity/2` size), so the pack kernel must read
+   from the owned-only arrays and the destination must write to its
+   owned-only arrays.
+4. **Compact stayers**: pack particles that remained in their owned region
+   into a contiguous prefix of the particle arrays (since migrating-out
+   particles leave gaps). Use the stale halo region (`[n, n_total)`)
+   as temporary workspace.
+5. **Append migrants**: copy received particles after the compacted stayers.
+6. **Swap / finalise**: update `n` and `n_total` on each GPU.
 
-### Files
-- `src/migration.h` (rewrite)
-- `src/pack_migrate.cuh` (new - pack kernels)
+### 5.5 Complexity / Risk
+
+- Most complex change in this plan. Introduces new packing kernels, per-GPU
+  buffer management, and pointer updates.
+- Only worth doing if Sections 3 + 4 still leave measurable migration cost
+  on crossing steps.
+- **Defer until benchmarks prove it's needed.**
+
+### 5.6 Decision Gate
+
+**Only implement if** after Sections 3 and 4, migration cost on crossing steps
+exceeds 5% of step time for relevant workloads.
+
+### 5.7 Files
+- `src/migration.h` / `src/migration.cu` — rewrite
+- `src/pack_migrate.cuh` / `src/pack_migrate.cu` (new) — pack kernels
 
 ---
 
-## 5. Implementation Order
+## 6. Implementation Order
 
 ```
-Step 1 --> BASELINE MEASURED
-              |
-              +--> Step 2 (crossing check) --> MEASURE IMPACT
-              |                                    |
-              |                                    +--> Step 3 (dynamic decomp) --> MEASURE
-              |                                    |                                    |
-              |                                    |                                    +--> Step 4 (GPU migration)?
-              |                                    |                                          ^
-              |                                    |                                   ONLY IF step 2+3
-              |                                    |                                   still leave measurable
-              |                                    |                                   migration cost
-              |                                    |
-              |                                    +--> Done (if migration cost =~ 0)
-              |
-              +--> Triage: migrate is X% of step time
-                   if X < 1% -> skip step 2
-                   if X < 5% -> step 2 only
-                   if X > 5% -> step 2 + 3
+                    ┌─────────────────────────────┐
+                    │ Step 0: Pre-benchmark fixes │
+                    │ (persistent contact counter,│
+                    │  VTK suppression for bench) │
+                    └─────────────┬───────────────┘
+                                  │
+                                  ▼
+                    ┌─────────────────────────────┐
+                    │ Step 1: Benchmarking        │
+                    │ (baseline data collected)   │
+                    └─────────────┬───────────────┘
+                                  │
+                    ┌─────────────┼───────────────┐
+                    │             │               │
+                    ▼             ▼               ▼
+          ┌──────────────┐ ┌───────────┐  ┌──────────────┐
+          │ Migrate cost │ │ Load      │  │ Halo cost    │
+          │ vs step time │ │ variance  │  │ vs step time │
+          └──────┬───────┘ └─────┬─────┘  └──────────────┘
+                 │               │
+                 ▼               ▼
+          ┌─────────────────────────────────────┐
+          │ Step 2: GPU crossing check          │
+          │ ALWAYS do this — no downside,       │
+          │ O(1) overhead, massive saving on    │
+          │ idle steps for any N > small        │
+          └─────────────────┬───────────────────┘
+                            │
+                            ▼
+          ┌─────────────────────────────────────┐
+          │ REMEASURE                           │
+          └─────────────────┬───────────────────┘
+                            │
+               ┌────────────┼─────────────┐
+               ▼                          ▼
+     ┌──────────────────┐     ┌──────────────────────┐
+     │ Migrate on       │     │ Load imbalance       │
+     │ crossing steps   │     │ > 15%?               │
+     │ > 5% of step?    │     │ → Step 3: Dynamic    │
+     │ → Step 4: GPU    │     │   decomposition      │
+     │   migration?     │     └──────────┬───────────┘
+     └──────────────────┘                │
+                               ┌────────┼────────┐
+                               ▼                 ▼
+                    ┌────────────────┐  ┌──────────────────┐
+                    │ REMEASURE      │  │ Migrate on       │
+                    │                │  │ crossing steps   │
+                    │                │  │ still > 5%?      │
+                    │                │  │ → Step 4: GPU    │
+                    │                │  │   migration      │
+                    └────────────────┘  └──────────────────┘
 ```
 
-### File Map
+**Summary of decision gates:**
+
+| Check | Threshold | Action |
+|---|---|---|
+| Step 1 complete? | Baseline collected | → always proceed to Step 2 |
+| Step 2 implement? | Always | No downside, unconditional |
+| Step 3 implement? | Load variance > 15% | Dynamic decomposition |
+| Step 4 implement? | Migration cost on crossing steps > 5% | GPU-side migration |
+
+### 6.1 File Map
+
 | Step | New Files | Modified Files |
 |---|---|---|
-| 1 | `src/benchmark.h` | `src/main.cu` |
-| 2 | - | `src/migration.h`, `src/particle_device.cuh` |
-| 3 | - | `src/domain.h`, `src/main.cu` |
-| 4 | `src/pack_migrate.cuh` | `src/migration.h` |
+| 0 | — | `src/main.cu`, `src/particle_device.cuh`, `src/particle_host.h`, `src/particle_host.cu` |
+| 1 | `src/benchmark.h`, `src/benchmark.cu` | `src/main.cu`, `Makefile` |
+| 2 | `src/pack_migrate.cuh`, `src/pack_migrate.cu` | `src/migration.h`, `src/migration.cu`, `src/particle_device.cuh`, `src/particle_host.h`, `src/particle_host.cu` |
+| 3 | — | `src/domain.h`, `src/domain.cu`, `src/main.cu` |
+| 4 | — | `src/migration.h`, `src/migration.cu`, `src/pack_migrate.cuh`, `src/pack_migrate.cu` |
 
 ---
 
-## 6. Test Cases
+## 7. Test Cases
 
-### 6.1 Why More Test Cases Are Needed
+### 7.1 Existing Scenes (Limitations)
 
-The existing scenes are too mild to stress-test migration and load balancing:
+| Scene | Particles | Stress Type | Limitation |
+|---|---|---|---|
+| `two_discs.json` | 2 | 1 contact, 1 crossing | Trivial |
+| `random20.json` | 20 | Sparse contacts | No migration stress |
+| `cube8/16/256.json` | 8–256 | Uniform, stationary | No load imbalance, rare crossings |
 
-| Scene | Particles | Crossings | Contacts | Load Imbalance |
-|---|---|---|---|---|
-| `two_discs.json` | 2 | 1 crossing, then bounce | 1 contact | None |
-| `random20.json` | 20 | Occasional, low velocity | Sparse | Minimal |
-| `cube8/16/256.json` | 8-256 | Rare (stationary) | Varies | None (uniform) |
+These are useful for correctness checks but insufficient for performance
+benchmarking.
 
-To properly benchmark migration frequency, contact density, and load variance,
-we need scenes that deliberately stress each subsystem.
+### 7.2 Stress Test Scenes
 
-### 6.2 Stress Test Scenes
+All generators use a fixed random seed for reproducibility.
 
-#### S1 - Crossing Storm (`crossing_storm.json`)
-**Goal:** Max migration frequency - particles racing across boundaries at high speed.
+#### S1 — Crossing Frequency (`crossing_freq.json`)
+**Goal**: Frequent boundary crossings to stress-test migration guard.
 
-- Domain: 20.0 x 10.0
-- Particles: 100, split evenly between GPU domains
-- Velocity: 50-100 m/s in X (random direction, high magnitude)
-- Radius: 0.2 (small - less contact, more crossing)
-- dt: 1e-5 (small timestep to track fast particles)
+- Domain: 20.0 × 10.0
+- Particles: 500, placed in narrow strips straddling each domain boundary
+  (e.g., for 4 GPUs, place ~125 particles in [4.8, 5.2] around each boundary)
+- Velocity: 2–5 m/s in ±X (particles oscillate across boundaries)
+- Radius: 0.15 (small — minimise contacts, maximise crossings)
+- dt: 5e-4
 - Gravity: [0, 0, 0]
+- Steps: 50,000
 
-Expected: migration triggers on > 20% of steps. High-velocity crossing is the
-worst case for the current CPU round-trip.
+Expected: migration triggers on 5–15% of steps. Particles near boundaries
+cross back and forth continuously.
 
-#### S2 - All-on-One (`all_on_gpu0.json`)
-**Goal:** Extreme load imbalance + mass migration on step 1.
+#### S2 — All-on-One (`all_on_gpu0.json`)
+**Goal**: Extreme load imbalance — all particles on GPU 0 at startup.
 
-- Domain: 10.0 x 10.0
-- Particles: 500, all placed in GPU 0's owned region (x < domain_width/N for N GPUs)
-- Velocity: 5-10 m/s random (particles spread across domain over time)
+- Domain: 10.0 × 10.0
+- Particles: 500, all placed in GPU 0's owned region (x < domain_width/N
+  for an N-GPU split)
+- Velocity: 5–10 m/s random (particles spread across domain over time)
 - Radius: 0.3
 - dt: 5e-5
 - Gravity: [0, 0, 0]
 
-Expected: GPU 0 heavily overloaded at start. Dynamic decomposition should
-redistribute. Migration triggers on nearly every early step as particles spread.
+Expected: GPU 0 heavily overloaded. Dynamic decomposition should
+redistribute domains. Migration triggers on most early steps as particles
+spread.
 
-#### S3 - Dense Pack (`dense_pack.json`)
-**Goal:** Maximum contact density - stress-test force kernel.
+#### S3 — Dense Contacts (`dense_contacts.json`)
+**Goal**: Maximum contact density — stress-test force kernel scaling.
 
-- Domain: 5.0 x 5.0
-- Particles: 1000, hexagonally packed at near-touching distance
-- Velocity: 0.5-2 m/s random (small perturbations to break symmetry)
-- Radius: 0.3 (spacing = 0.61 -> slight overlap)
+- Domain: 8.0 × 8.0
+- Particles: 1000, placed on a perturbed hexagonal lattice with spacing
+  slightly less than 2×radius (guaranteed overlap at startup)
+- Radius: 0.3
+- Velocity: 0.1–0.5 m/s (small perturbations to break symmetry)
 - dt: 5e-5
 - Gravity: [0, -9.8, 0] (settling under gravity)
+- kn: 1000
 
-Expected: thousands of contacts per step. Benchmarks force kernel scaling
-under high contact load.
+**Note**: 1000 particles of radius 0.3 in an 8×8 domain gives a packing
+fraction of ~4.4 (particles overlap by ~4×). This produces very large
+initial contact forces and is primarily a **numerical stability and
+contact-density stress test**. Use a smaller dt or fewer particles if
+the simulation diverges.
 
-#### S4 - Large Radius (`large_radius.json`)
-**Goal:** Large halo width -> many ghost particles transferred.
+Expected: thousands of contacts per step. Benchmarks force kernel
+performance under high contact load.
 
-- Domain: 20.0 x 20.0
+#### S4 — Large Halo (`large_halo.json`)
+**Goal**: Large halo width → many ghost particles transferred.
+
+- Domain: 20.0 × 20.0
 - Particles: 200, evenly distributed
-- Radius: 0.8-1.2 (large -> halo_width = 2.4)
-- Velocity: 5-15 m/s random
+- Radius: 0.8–1.2 (halo_width = 2.4, nearly half a GPU's width with 4 GPUs)
+- Velocity: 5–15 m/s random
 - dt: 1e-4
 - Gravity: [0, 0, 0]
 
-Expected: Ghost particles = 20-40% of owned (vs. 5-15% for normal scenes).
+Expected: Ghost particles = 30–50% of owned (vs. 5–15% for normal scenes).
 Stress-tests halo exchange packing kernel and cudaMemcpyPeer bandwidth.
 
-#### S5 - Combined Stress (`stress_all.json`)
-**Goal:** All stressors at once - many particles, large radius, high velocity,
-clustered start.
+#### S5 — Combined Stress (`stress_all.json`)
+**Goal**: All stressors simultaneously — many particles, large radius,
+high velocity, clustered start.
 
-- Domain: 20.0 x 20.0
+- Domain: 20.0 × 20.0
 - Particles: 1000, all in leftmost 25% of domain
-- Radius: 0.5 (large -> big halo, many contacts)
-- Velocity: 20-50 m/s random
-- Mass: 0.1-2.0 (wide mass range tests harmonic-mean contact properties)
-- dt: 2e-5 (small timestep for fast particles)
+- Radius: 0.5 (halo_width = 1.0)
+- Velocity: 20–50 m/s random
+- Mass: 0.1–2.0 (wide mass range tests harmonic-mean contact properties)
+- dt: 2e-5
 - Gravity: [0, -9.8, 0]
+- Steps: 100,000 (longer run needed — 10k steps = 0.2s sim time, not
+  enough for particles to cross the full domain)
 
 Expected: Heavy migration early, high contacts, large ghost counts, load
-imbalance. This is the "worst case" benchmark for validating all optimizations.
+imbalance. This is the "worst case" benchmark for validating all
+optimisations.
 
-### 6.3 Scene Generators
+#### S6 — Scale Test
+**Goal**: Measure scaling behaviour with particle count.
 
-Each scene gets a Python generator script in `scenes/` (following the pattern
-of `gen_lattice.py`):
+- Scenes with 1k, 10k, 100k particles, uniform random distribution
+- Use existing `gen_random.py` / `gen_random3d.py` patterns
+- Fixed domain size, fixed dt, fixed step count
+- Run on 1, 2, 4 GPUs
+
+Expected: Identifies the crossover where communication cost exceeds
+computation benefit. Determines whether the current approach is
+compute-bound or bandwidth-bound at scale.
+
+### 7.3 Scene Generators
 
 | Generator | Output Scene |
 |---|---|
-| `scenes/gen_crossing_storm.py` | `scenes/crossing_storm.json` |
-| `scenes/gen_clustered.py` | `scenes/all_on_gpu0.json` |
-| `scenes/gen_dense_pack.py` | `scenes/dense_pack.json` |
-| `scenes/gen_large_radius.py` | `scenes/large_radius.json` |
-| `scenes/gen_stress_all.py` | `scenes/stress_all.json` |
+| `scripts/gen_crossing_freq.py` | `scenes/crossing_freq.json` |
+| `scripts/gen_clustered.py` | `scenes/all_on_gpu0.json` |
+| `scripts/gen_dense_contacts.py` | `scenes/dense_contacts.json` |
+| `scripts/gen_large_halo.py` | `scenes/large_halo.json` |
+| `scripts/gen_stress_all.py` | `scenes/stress_all.json` |
 
-### 6.4 Benchmark Protocol
+All generators accept a `--seed` flag (default: fixed constant) for
+deterministic output.
 
-For each test scene, run with 1, 2, 4 GPUs and record:
+### 7.4 Benchmark Protocol
+
+For each test scene, run with 1, 2, 4 GPUs:
 ```
-./build/md2d scenes/<scene>.json 10000 <num_gpus> <vtk_interval>
+./build/md2d scenes/<scene>.json <steps> <num_gpus> <vtk_interval> [bench_interval]
 ```
 
 | Configuration | Purpose |
 |---|---|
-| 1 GPU | Baseline (no migration, no halo) |
+| 1 GPU | Baseline (no migration, no halo, no comm) |
 | 2 GPUs | Minimal multi-GPU (1 boundary) |
 | 4 GPUs | Realistic multi-GPU (3 boundaries) |
 
-Collect from benchmark output:
+For benchmarking runs, set `vtk_interval` larger than `max_steps` to
+suppress VTK output entirely.
+
+Collect from CSV output:
 - Avg step time, halo time, migration time
 - Migration trigger frequency
 - Ghost particle count
 - Contact count
 - Load variance
 
-Compare before/after each optimization step (1->2->3->4) to quantify improvement.
+Compare before/after each optimisation step to quantify improvement.
+
+---
+
+## 8. Success Criteria
+
+| Goal | Metric | Target |
+|---|---|---|
+| Migration overhead (idle steps) | avg migrate/step | < 0.1% of step time |
+| Migration overhead (crossing steps) | migrate time on trigger | < 5% of step time |
+| Load balance | `max(n_g) / mean(n_g)` | < 1.15 for 90% of steps |
+| Halo exchange overhead | avg halo/step | < 10% of step time |
+| Strong scaling efficiency | `T(1) / (N × T(N))` | > 0.7 for N=4 on cube256 |
+| Benchmark accuracy | timer overhead | < 1 µs per event pair |
+
+These targets are provisional and should be revised once baseline data exists.
+
+---
+
+## 9. Future Work (Deferred)
+
+- **CUDA streams**: overlap halo peer copies with local force computation.
+  Currently everything uses the default stream.
+- **Async VTK**: download + write on a separate stream/thread so VTK cost
+  doesn't block the simulation.
+- **Full 3D dynamic decomposition**: repartition all three axes, not just X.
+- **NVIDIA NSight profiling**: once benchmarks identify the bottleneck,
+  use NSight Compute/Systems for deeper kernel-level analysis.
+- **MPI backend**: for multi-node scaling beyond a single host's GPU count.

@@ -1,7 +1,8 @@
 # Makefile for md2d — GPU-accelerated 2D molecular dynamics simulator
 #
 # Usage:
-#   make              — build the md2d binary
+#   make              — build the md3d binary (3D, default)
+#   make md2d         — build the md2d binary (2D, z=0 enforced)
 #   make clean        — remove build artifacts
 #
 # On the TinyGPU cluster, load CUDA before building:
@@ -39,12 +40,14 @@ NVCCFLAGS += -gencode arch=compute_75,code=sm_75   # RTX 2080 Ti
 NVCCFLAGS += -gencode arch=compute_80,code=sm_80   # A100
 NVCCFLAGS += -gencode arch=compute_86,code=sm_86   # RTX 3080
 
-# Relocatable device code (consistent with original CMake build)
 # Suppress deprecation warning for sm_70 (V100) — still supported, just
 # flagged as legacy in CUDA 12.8+. Remove this line once sm_70 is dropped.
 NVCCFLAGS += -Wno-deprecated-gpu-targets
 
-# Relocatable device code (consistent with original build)
+# Suppress host/device annotation warning on defaulted constructors
+# NVCCFLAGS += -diag-suppress 20012
+
+# Relocatable device code (required for separate compilation across .cu files)
 NVCCFLAGS += -rdc=true
 
 # Linker flags
@@ -53,7 +56,8 @@ LDFLAGS := -rdc=true
 # ---------------------------------------------------------------------------
 # Source and targets
 # ---------------------------------------------------------------------------
-SRC        := src/main.cu
+SRC := $(wildcard src/*.cu)
+
 TARGET      := md2d
 TARGET_3D   := md3d
 NVCCFLAGS_3D := $(NVCCFLAGS) -DMD3D

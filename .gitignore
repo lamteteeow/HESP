@@ -420,7 +420,12 @@ FodyWeavers.xsd
 
 # Build output directories
 build/
-output/
 
 # Mini-project simulation output
 output/
+
+# Benchmark CSV results (keep folder, ignore generated files)
+benchmark/*.csv
+
+# Benchmark CSV results (keep folder, ignore generated files)
+benchmark/*.csv

@@ -8,7 +8,7 @@
 
 struct Vec3 {
   float x, y, z;
-  __host__ __device__ Vec3() = default;
+  Vec3() = default;
   __host__ __device__ Vec3(const float x, const float y, const float z)
       : x(x), y(y), z(z) {}
   __host__ __device__ __forceinline__ bool
