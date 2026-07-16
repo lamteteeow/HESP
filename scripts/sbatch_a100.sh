@@ -1,28 +1,28 @@
 #!/bin/bash -l
 # ============================================================================
-# md2d batch job — A100 partition (NVLink, best multi-GPU performance)
+# md3d batch job — A100 partition (NVLink, best multi-GPU performance)
 #
 # Usage:
 #   sbatch.tinygpu scripts/sbatch_a100.sh <scene.json> [max_steps] [num_gpus]
 #
 # Override GPU count on the command line:
-#   sbatch.tinygpu --gres=gpu:a100:4 scripts/sbatch_a100.sh scenes/random20.json 50000 4
+#   sbatch.tinygpu --gres=gpu:a100:4 scripts/sbatch_a100.sh scenes/cube256.json 50000 4
 #
 # Examples:
-#   sbatch.tinygpu scripts/sbatch_a100.sh scenes/random20.json 50000 2
-#   sbatch.tinygpu scripts/sbatch_a100.sh scenes/two_discs.json 10000
+#   sbatch.tinygpu scripts/sbatch_a100.sh scenes/cube256.json 50000 2
+#   sbatch.tinygpu scripts/sbatch_a100.sh scenes/crossing_freq.json 10000 4
 # ============================================================================
 
 #SBATCH --gres=gpu:a100:2
 #SBATCH --partition=a100
 #SBATCH --time=6:00:00
 #SBATCH --export=NONE
-#SBATCH --job-name=md2d
+#SBATCH --job-name=md3d
 
 unset SLURM_EXPORT_ENV
 
 # ---- Parse arguments ----
-SCENE="${1:-scenes/random20.json}"
+SCENE="${1:-scenes/cube256.json}"
 MAX_STEPS="${2:-50000}"
 NUM_GPUS="${3:-2}"
 
@@ -37,4 +37,4 @@ module load cuda/12.8.0
 make
 
 # ---- Run ----
-./md2d "$SCENE" "$MAX_STEPS" "$NUM_GPUS"
+./md3d "$SCENE" "$MAX_STEPS" "$NUM_GPUS"

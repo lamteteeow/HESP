@@ -27,7 +27,7 @@ void writeParticlesVTK(int frame, const std::vector<Vec3> &positions,
     throw std::runtime_error("Failed to open VTK file: " + fname.str());
 
   f << "# vtk DataFile Version 3.0\n";
-  f << "MD2D Particles\nASCII\nDATASET UNSTRUCTURED_GRID\n\n";
+  f << "MD Particles\nASCII\nDATASET UNSTRUCTURED_GRID\n\n";
 
   f << "POINTS " << n << " float\n";
   for (size_t i = 0; i < n; ++i)
@@ -77,13 +77,8 @@ void writeDomainBoundaryVTK(const Vec3 domain_min, const Vec3 domain_max,
   if (!f)
     throw std::runtime_error("Failed to open domain boundary VTK file");
 
-  const float min_x = domain_min.x, min_y = domain_min.y;
-  const float max_x = domain_max.x, max_y = domain_max.y;
-#ifdef MD3D
-  const float min_z = domain_min.z, max_z = domain_max.z;
-#else
-  const float min_z = 0.0f, max_z = 0.0f;
-#endif
+  const float min_x = domain_min.x, min_y = domain_min.y, min_z = domain_min.z;
+  const float max_x = domain_max.x, max_y = domain_max.y, max_z = domain_max.z;
   const int num_gpus = static_cast<int>(doms.size());
 
   struct Pt { float x, y, z; };
@@ -96,8 +91,7 @@ void writeDomainBoundaryVTK(const Vec3 domain_min, const Vec3 domain_max,
     return static_cast<int>(pts.size()) - 1;
   };
 
-  // --- Outer domain box ---
-#ifdef MD3D
+  // --- Outer domain box (3D wireframe) ---
   int b0 = addPt(min_x, min_y, min_z), b1 = addPt(max_x, min_y, min_z);
   int b2 = addPt(max_x, max_y, min_z), b3 = addPt(min_x, max_y, min_z);
   int t0 = addPt(min_x, min_y, max_z), t1 = addPt(max_x, min_y, max_z);
@@ -107,13 +101,6 @@ void writeDomainBoundaryVTK(const Vec3 domain_min, const Vec3 domain_max,
            {t0,t1},{t1,t2},{t2,t3},{t3,t0},
            {b0,t0},{b1,t1},{b2,t2},{b3,t3}})
     { lines.push_back({2, l[0], l[1]}); line_types.push_back(0); }
-#else
-  int bl = addPt(min_x, min_y, min_z), br = addPt(max_x, min_y, min_z);
-  int tr = addPt(max_x, max_y, min_z), tl = addPt(min_x, max_y, min_z);
-  for (auto &l : std::vector<std::vector<int>>{
-           {bl,br},{br,tr},{tr,tl},{tl,bl}})
-    { lines.push_back({2, l[0], l[1]}); line_types.push_back(0); }
-#endif
 
   // --- Owned-region split lines ---
   const int nx = doms[0].grid_nx, ny = doms[0].grid_ny, nz = doms[0].grid_nz;
@@ -140,9 +127,8 @@ void writeDomainBoundaryVTK(const Vec3 domain_min, const Vec3 domain_max,
     lines.push_back({2, tl, bl}); line_types.push_back(1);
   }
 
-  // --- Halo strips ---
+  // --- Halo strips (3D boxes, 6 quad faces each) ---
   auto addBox = [&](float x0, float x1, float y0, float y1, float z0, float z1) {
-#ifdef MD3D
     int p000 = addPt(x0, y0, z0), p100 = addPt(x1, y0, z0);
     int p110 = addPt(x1, y1, z0), p010 = addPt(x0, y1, z0);
     int p001 = addPt(x0, y0, z1), p101 = addPt(x1, y0, z1);
@@ -154,21 +140,11 @@ void writeDomainBoundaryVTK(const Vec3 domain_min, const Vec3 domain_max,
     polys.push_back({4, p000, p100, p101, p001});
     polys.push_back({4, p010, p110, p111, p011});
     for (int k = 0; k < 6; ++k) poly_types.push_back(2);
-#else
-    int a = addPt(x0, y0, 0), b = addPt(x1, y0, 0);
-    int c = addPt(x1, y1, 0), d = addPt(x0, y1, 0);
-    polys.push_back({4, a, b, c, d});
-    poly_types.push_back(2);
-#endif
   };
 
   for (int g = 0; g < num_gpus; ++g) {
     const Domain &d = doms[g];
-#ifdef MD3D
     float z0 = d.owned_min.z, z1 = d.owned_max.z;
-#else
-    float z0 = 0, z1 = 0;
-#endif
     if (d.left_neighbor >= 0)
       addBox(d.local_min.x, d.owned_min.x, d.owned_min.y, d.owned_max.y, z0, z1);
     if (d.right_neighbor >= 0)

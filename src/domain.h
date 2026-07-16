@@ -4,8 +4,7 @@
 #include <vector>
 
 // Describes one GPU's portion of the simulation domain.
-// 2D mode: X-only split (nx=n, ny=nz=1).
-// 3D mode: full nx×ny×nz grid decomposition.
+// Domains are split into an nx×ny×nz grid via factorGrid3D.
 struct Domain {
   int gpu_id;
   int left_neighbor, right_neighbor;     // ±X
@@ -29,7 +28,6 @@ struct Domain {
 void factorGrid3D(int n, int &nx, int &ny, int &nz);
 
 // Construct domains split into nx×ny×nz 3D grid.
-// In 2D mode, falls back to X-only.
 std::vector<Domain> buildDomains(Vec3 gmin, Vec3 gmax, float halo_width,
                                   float cell_size, int num_gpus);
 

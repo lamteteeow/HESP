@@ -43,12 +43,6 @@ __global__ void integrate(const float dt, const size_t n,
   // Position update
   d_positions[i] += dt * d_velocities[i];
 
-#ifndef MD3D
-  // Enforce 2D plane (compile with -DMD3D to disable)
-  d_positions[i].z = 0.0f;
-  d_velocities[i].z = 0.0f;
-#endif
-
   // Reflective domain walls
   reflectWalls(d_positions[i], d_velocities[i], d_radii[i], global_min,
                global_max);

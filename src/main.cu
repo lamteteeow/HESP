@@ -120,14 +120,8 @@ int main(int argc, char **argv) {
     std::vector<Domain> doms = buildDomains(cfg.domain_min, cfg.domain_max,
                                             halo_w, cell_size, num_gpus);
 
-    printf("Domain split into %d%s grid: %dx%dx%d (halo_width=%.3f):\n",
-           num_gpus,
-#ifdef MD3D
-           "-GPU 3D", doms[0].grid_nx, doms[0].grid_ny, doms[0].grid_nz,
-#else
-           "-GPU 2D", doms[0].grid_nx, doms[0].grid_ny, doms[0].grid_nz,
-#endif
-           halo_w);
+    printf("Domain split into %d-GPU 3D grid: %dx%dx%d (halo_width=%.3f):\n",
+           num_gpus, doms[0].grid_nx, doms[0].grid_ny, doms[0].grid_nz, halo_w);
     for (int g = 0; g < num_gpus; ++g) {
       const Domain &d = doms[g];
       printf("  GPU%d: grid(%d,%d,%d) cells %dx%dx%d  owned [%.1f-%.1f, %.1f-%.1f, %.1f-%.1f]"
@@ -224,9 +218,6 @@ int main(int argc, char **argv) {
           // Persistent contact counter (allocated once at startup)
           CHECK_CUDA(cudaMemset(pds[g].d_contact_count, 0, sizeof(int)));
           dim3 grid((pds[g].n + BLOCK.x - 1) / BLOCK.x);
-          if (step == 1) printf("DEBUG step=1 gpu=%d d_contact_count=%p d_nb=%p d_forces=%p\n",
-                               g, (void*)pds[g].d_contact_count,
-                               (void*)d_nb[g], (void*)pds[g].d_forces);
           if (warm) bench.start(Benchmark::FORCE, g);
           computeContactForces<<<grid, BLOCK>>>(
               pds[g].n, pds[g].n_total, pds[g].d_positions, pds[g].d_velocities,

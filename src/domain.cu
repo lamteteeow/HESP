@@ -31,11 +31,7 @@ void factorGrid3D(int n, int &nx, int &ny, int &nz) {
 std::vector<Domain> buildDomains(Vec3 gmin, Vec3 gmax, float halo_width,
                                   float cell_size, int num_gpus) {
   int nx, ny, nz;
-#ifdef MD3D
   factorGrid3D(num_gpus, nx, ny, nz);
-#else
-  nx = num_gpus; ny = 1; nz = 1;
-#endif
 
   const float dx = (gmax.x - gmin.x) / nx;
   const float dy = (gmax.y - gmin.y) / ny;
@@ -76,13 +72,9 @@ std::vector<Domain> buildDomains(Vec3 gmin, Vec3 gmax, float halo_width,
         d.local_min = {std::max(lx_lo, gmin.x), std::max(ly_lo, gmin.y), std::max(lz_lo, gmin.z)};
         d.local_max = {std::min(lx_hi, gmax.x), std::min(ly_hi, gmax.y), std::min(lz_hi, gmax.z)};
 
-        d.num_cells.x = static_cast<int>(std::ceil((d.local_max.x - d.local_min.x) / cell_size));
-        d.num_cells.y = static_cast<int>(std::ceil((d.local_max.y - d.local_min.y) / cell_size));
-#ifdef MD3D
-        d.num_cells.z = static_cast<int>(std::ceil((d.local_max.z - d.local_min.z) / cell_size));
-#else
-        d.num_cells.z = 1;
-#endif
+        d.num_cells.x = std::max(1, static_cast<int>(std::ceil((d.local_max.x - d.local_min.x) / cell_size)));
+        d.num_cells.y = std::max(1, static_cast<int>(std::ceil((d.local_max.y - d.local_min.y) / cell_size)));
+        d.num_cells.z = std::max(1, static_cast<int>(std::ceil((d.local_max.z - d.local_min.z) / cell_size)));
         d.total_cells = d.num_cells.x * d.num_cells.y * d.num_cells.z;
       }
     }

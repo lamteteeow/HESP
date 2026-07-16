@@ -240,7 +240,7 @@ exceeds a threshold (e.g., `max_n > 1.2 × mean_n`). Use hysteresis: don't
 rebalance again until variance has been above threshold for 2 consecutive
 checks, and don't rebalance if the improvement would be < 5%.
 
-**2D X-only (md2d)**:
+**X-axis rebalancing**:
 1. Collect `n_g` per GPU (already available).
 2. Sort particle positions on each GPU and gather to host (required for
    precise boundary placement — this is the main cost).
@@ -430,7 +430,6 @@ exceeds 5% of step time for relevant workloads.
 
 | Scene | Particles | Stress Type | Limitation |
 |---|---|---|---|
-| `two_discs.json` | 2 | 1 contact, 1 crossing | Trivial |
 | `random20.json` | 20 | Sparse contacts | No migration stress |
 | `cube8/16/256.json` | 8–256 | Uniform, stationary | No load imbalance, rare crossings |
 

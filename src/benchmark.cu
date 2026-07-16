@@ -41,9 +41,10 @@ bool Benchmark::isSum(Metric m) const {
 void Benchmark::init(int num_gpus, const std::string &scene, long max_steps) {
   num_gpus_ = num_gpus;
 
-  // Create CUDA events
+  // Create CUDA events — one pair per metric per GPU, on the correct device
   for (int m = 0; m < NUM_METRICS; ++m) {
     for (int g = 0; g < num_gpus; ++g) {
+      CHECK_CUDA(cudaSetDevice(g));
       CHECK_CUDA(cudaEventCreate(&ev_start_[m][g]));
       CHECK_CUDA(cudaEventCreate(&ev_stop_[m][g]));
     }

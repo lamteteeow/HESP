@@ -1,5 +1,5 @@
 """
-gen_lattice.py — generate a 2D hexagonal lattice scene for md2d.
+gen_lattice.py — generate a 3D hexagonal lattice scene for md3d.
 
 Usage:
     python gen_lattice.py [options] > scenes/lattice.json
