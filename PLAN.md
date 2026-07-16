@@ -156,6 +156,21 @@ is also reported separately.
 - `src/particle_host.h` / `src/particle_host.cu` (allocate/free persistent counter)
 - `Makefile` (add new `.cu` files)
 
+### 2.7 Runtime Toggles
+
+Environment variables control algorithm variants for A/B comparison without
+recompiling:
+
+| Variable | Values | Default | Effect |
+|---|---|---|---|
+| `HALO` | `gpu`, `cpu` | `gpu` | GPU packing + `cudaMemcpyPeer` vs CPU download/filter/upload |
+| `MIGRATE` | `cpu`, `gpu` | `cpu` | CPU round-trip vs GPU packing (GPU path: Step 4) |
+| `DYNAMIC` | `off`, `on` | `off` | Dynamic domain decomposition (Step 3) |
+
+CSV filenames include mode tags (e.g., `_halocpu`) so different configurations
+produce separate output files without overwriting. The startup banner prints
+the active configuration: `Modes: halo=gpu  migrate=cpu  dynamic=off`.
+
 ---
 
 ## 3. GPU-side Crossing Check (Cheap Migration Guard)

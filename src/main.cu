@@ -1,5 +1,7 @@
 #include <algorithm>
 #include <chrono>
+#include <cstdlib>
+#include <cstring>
 #include <cuda_runtime.h>
 #include <iostream>
 #include <stdexcept>
@@ -92,6 +94,15 @@ int main(int argc, char **argv) {
     if (argc > 3)
       num_gpus = std::min(static_cast<int>(std::stol(argv[3])), device_count);
     printf("Using %d of %d available GPUs\n", num_gpus, device_count);
+
+    // ── Runtime mode toggles (env vars) ────────────────────────────────
+    const char *halo_m    = getenv("HALO");
+    const char *migrate_m = getenv("MIGRATE");
+    const char *dynamic_m = getenv("DYNAMIC");
+    printf("Modes: halo=%s  migrate=%s  dynamic=%s\n",
+           (halo_m    && strcmp(halo_m,    "cpu") == 0) ? "cpu" : "gpu",
+           (migrate_m && strcmp(migrate_m, "gpu") == 0) ? "gpu" : "cpu",
+           (dynamic_m && strcmp(dynamic_m, "on")  == 0) ? "on"  : "off");
 
     // Enable peer access between all GPU pairs (prerequisite for
     // cudaMemcpyPeer). Not all pairs may support it; skip those that don't.

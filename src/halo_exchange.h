@@ -16,21 +16,24 @@ struct HaloPackBuf {
 };
 
 void allocHaloPackBuf(HaloPackBuf &b, size_t max_n);
-
 void freeHaloPackBuf(HaloPackBuf &b);
 
-// GPU-side pack kernel + count retrieval.  Only 4 bytes come back to CPU.
-// 'buf_off' is the starting index in the output buffer (cumulative offset).
-// Call cudaSetDevice(gpu_id) before this.
+// GPU-side pack kernel + count retrieval.
 int packStrip(const ParticleDevice &pd, float lo, float hi,
               int axis, HaloPackBuf &buf, dim3 block, size_t buf_off);
 
-// Halo exchange using GPU-side packing + cudaMemcpyPeer.
-// No CPU staging of particle data — only 4-byte counts cross the bus.
-// Returns total ghost particles transferred × 2 (send + receive, for diagnostics).
+// Halo exchange — reads HALO env var:
+//   HALO=gpu (default): GPU packing + cudaMemcpyPeer
+//   HALO=cpu:           download → CPU filter → upload (baseline)
 int exchangeHalos(std::vector<ParticleDevice> &pds,
                   const std::vector<Domain> &doms,
                   std::vector<HaloPackBuf> &halo_bufs,
                   dim3 block);
+
+// Get current halo mode string (for benchmark labelling)
+inline const char *haloMode() {
+  const char *v = getenv("HALO");
+  return (v && strcmp(v, "cpu") == 0) ? "cpu" : "gpu";
+}
 
 #endif // HALO_EXCHANGE_H

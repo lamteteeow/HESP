@@ -90,8 +90,41 @@ The 5th CLI argument controls benchmark output interval:
 ```
 
 Per-step metrics print to stdout every `bench_interval` steps. A CSV is written
-to `benchmark/bench_<scene>_<steps>.csv`. Set `bench_interval=0` for
-final-summary-only (no per-step blocks).
+to `benchmark/bench_<scene>_<steps>_gpu<N>[_halocpu].csv`. Set `bench_interval=0`
+for final-summary-only (no per-step blocks).
+
+Compare two runs:
+
+```bash
+python3 scripts/compare_bench.py benchmark/bench_*_gpu1.csv benchmark/bench_*_gpu2.csv
+```
+
+## Runtime flags (environment variables)
+
+Toggle algorithm variants without recompiling:
+
+| Variable | Values | Default | Effect |
+|---|---|---|---|
+| `HALO` | `gpu`, `cpu` | `gpu` | GPU packing + `cudaMemcpyPeer` vs CPU download/filter/upload |
+| `MIGRATE` | `cpu`, `gpu` | `cpu` | CPU round-trip vs GPU packing (GPU path not yet implemented) |
+| `DYNAMIC` | `off`, `on` | `off` | Dynamic domain decomposition (not yet implemented) |
+
+Examples:
+
+```bash
+# GPU halo (default)
+./md3d scenes/crossing_freq.json 5000 2 10000 100
+
+# CPU halo baseline
+HALO=cpu ./md3d scenes/crossing_freq.json 5000 2 10000 100
+
+# Compare GPU vs CPU halo
+HALO=gpu ./md3d scenes/crossing_freq.json 5000 2 10000 100
+HALO=cpu ./md3d scenes/crossing_freq.json 5000 2 10000 100
+python3 scripts/compare_bench.py \
+  benchmark/bench_crossing_freq_5000_gpu2.csv \
+  benchmark/bench_crossing_freq_5000_gpu2_halocpu.csv
+```
 
 ## ParaView
 
@@ -123,9 +156,12 @@ final-summary-only (no per-step blocks).
 
 ## Cluster hardware
 
-| Partition | GPUs/node | Type |
-|---|---|---|
-| `a100` | 4× | A100 SXM4 (NVLink, 40 GB) |
-| `v100` | 4× | Tesla V100 (32 GB) |
-| `work` | 4× | RTX 2080 Ti (11 GB) |
-| `work` | 8× | RTX 3080 (10 GB) |
+| Partition | GPUs/node | GPU | Interconnect |
+|---|---|---|---|
+| `a100` | 4× | A100 SXM4 (40 GB) | **NVLink** (600 GB/s) |
+| `v100` | 4× | Tesla V100 (32 GB) | **NVLink** (300 GB/s) |
+| `rtx3080` | 8× | RTX 3080 (10 GB) | PCIe 3.0 |
+| `work` | 4× | RTX 2080 Ti (11 GB) | PCIe 3.0 |
+
+A100 and V100 have NVLink — `cudaMemcpyPeer` runs at GPU-GPU bandwidth
+rather than PCIe. Prefer these partitions for multi-GPU scaling benchmarks.

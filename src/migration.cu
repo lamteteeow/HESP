@@ -4,6 +4,7 @@
 #include "particle_host.h"
 #include "vec3.cuh"
 #include <cuda_runtime.h>
+#include <cstring>
 
 void migrateParticles(std::vector<ParticleDevice> &pds,
                       const std::vector<Domain> &doms, size_t total_n,
@@ -12,6 +13,13 @@ void migrateParticles(std::vector<ParticleDevice> &pds,
 
   // Single GPU: no domain boundaries exist, migration is impossible
   if (num_gpus <= 1) return;
+
+  // ── Mode check ────────────────────────────────────────────────────────
+  const char *mode = getenv("MIGRATE");
+  if (mode && strcmp(mode, "gpu") == 0) {
+    fprintf(stderr, "MIGRATE=gpu not yet implemented, falling back to CPU\n");
+    // Fall through to CPU path below
+  }
 
   // ── GPU-side crossing check (4-byte flag per GPU) ─────────────────────
   constexpr dim3 BLOCK(256);

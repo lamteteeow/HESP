@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <iomanip>
 
 // ── helpers ─────────────────────────────────────────────────────────────────
@@ -50,9 +52,14 @@ void Benchmark::init(int num_gpus, const std::string &scene, long max_steps) {
     }
   }
 
-  // Open CSV
+  // Open CSV (with mode tags so different configs don't collide)
+  const char *hm = getenv("HALO");
+  const char *mm = getenv("MIGRATE");
+  std::string tag;
+  if (hm && strcmp(hm, "cpu") == 0) tag += "_halocpu";
+  if (mm && strcmp(mm, "gpu") == 0) tag += "_miggpu";
   csv_path_ = "benchmark/bench_" + scene + "_" + std::to_string(max_steps)
-            + "_gpu" + std::to_string(num_gpus) + ".csv";
+            + "_gpu" + std::to_string(num_gpus) + tag + ".csv";
   csv_.open(csv_path_);
   if (!csv_) {
     fprintf(stderr, "\n*** WARNING: cannot open %s for benchmark CSV\n",
