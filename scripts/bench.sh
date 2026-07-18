@@ -56,9 +56,10 @@ echo "========================================"
 # ---- Load modules ----
 module load cuda/12.8.0
 
-# ---- Build (clean first — headers aren't tracked as deps) ----
-make clean
-make
+# ---- Build (once, before submitting — skip if binary exists) ----
+if [ ! -f md3d ]; then
+  make clean && make
+fi
 
 # ---- Run ----
 ./md3d "scenes/${SCENE}.json" "$MAX_STEPS" "$NUM_GPUS" "$VTK_INTERVAL" "$BENCH_INTERVAL"
