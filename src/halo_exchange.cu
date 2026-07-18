@@ -243,6 +243,8 @@ int exchangeHalos(std::vector<ParticleDevice> &pds,
                   const std::vector<Domain> &doms,
                   std::vector<HaloPackBuf> &halo_bufs,
                   dim3 block) {
+  if (pds.size() <= 1) return 0;  // single GPU: no neighbors, no halo
+
   const char *mode = getenv("HALO");
   if (mode && strcmp(mode, "gpu") == 0)
     return exchangeHalosGPU(pds, doms, halo_bufs, block);

@@ -59,7 +59,9 @@ int main(int argc, char **argv) {
   if (argc < 2) {
     std::cerr << "Usage: " << argv[0]
               << " <scene.json> [max_steps] [num_gpus] [vtk_interval]"
-                 " [bench_interval]\n";
+                 " [bench_interval]\n"
+              << "  vtk_interval=0  → disable VTK output\n"
+              << "  bench_interval=0 → final summary only (no per-step blocks)\n";
     return 1;
   }
   const long max_steps = (argc > 2) ? std::stol(argv[2]) : 100000;
@@ -315,8 +317,8 @@ int main(int argc, char **argv) {
         }
       }
 
-      // --- VTK output ---
-      if (step % steps_per_frame == 0) {
+      // --- VTK output (vtk_interval=0 disables) ---
+      if (steps_per_frame > 0 && step % steps_per_frame == 0) {
         if (warm) bench.startHost(Benchmark::VTK);
 
         std::vector<Vec3> pos, vel;

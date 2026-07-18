@@ -18,15 +18,14 @@ class Benchmark {
 public:
   enum Metric {
     WALL,          // host wall clock (end-to-end step)
-    HALO_PACK,     // packHaloParticles kernel
-    HALO_PEER,     // cudaMemcpyPeer transfers
+    HALO_PACK,     // halo exchange (host timer: pack + peer)
     ASSIGN,        // assignCell kernel
     FORCE,         // computeContactForces kernel
     INTEGRATE,     // integrate kernel
-    SYNC,          // cudaDeviceSynchronize loop (sum across GPUs)
-    MIG_DOWNLOAD,  // GPU→CPU download (sum)
-    MIG_MERGE,     // CPU merge+split (host timer)
-    MIG_UPLOAD,    // CPU→GPU upload (sum)
+    SYNC,          // cudaDeviceSynchronize loop
+    MIG_DOWNLOAD,  // CPU migration: GPU→CPU download
+    MIG_MERGE,     // CPU migration: merge+split / GPU migration: total
+    MIG_UPLOAD,    // CPU migration: CPU→GPU upload
     VTK,           // VTK output (download + write)
     NUM_METRICS
   };

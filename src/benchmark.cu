@@ -12,8 +12,7 @@
 const char *Benchmark::metricName(Metric m) {
   switch (m) {
   case WALL:         return "wall";
-  case HALO_PACK:    return "halo_pack";
-  case HALO_PEER:    return "halo_peer";
+  case HALO_PACK:    return "halo";
   case ASSIGN:       return "assign";
   case FORCE:        return "force";
   case INTEGRATE:    return "integrate";
@@ -27,10 +26,9 @@ const char *Benchmark::metricName(Metric m) {
 }
 
 bool Benchmark::isSum(Metric m) const {
-  // Sum: transfers that compete for PCIe bandwidth, and sync (host loop).
+  // Sum: transfers that compete for PCIe bandwidth.
   // Max: compute kernels (critical path is slowest GPU).
   switch (m) {
-  case HALO_PEER:
   case SYNC:
   case MIG_DOWNLOAD:
   case MIG_UPLOAD:  return true;
@@ -130,8 +128,7 @@ void Benchmark::endStep(long step, int bench_interval,
   steps_++;
 
   // Resolve pending CUDA events and accumulate.
-  // Only query GPU-timer metrics (ASSIGN, FORCE, INTEGRATE); host-timer
-  // metrics and HALO_PEER are skipped.
+  // Only query GPU-timer metrics (ASSIGN, FORCE, INTEGRATE).
   double metric_ms[NUM_METRICS] = {};
 
   static const int gpu_metrics[] = {ASSIGN, FORCE, INTEGRATE};
@@ -206,10 +203,8 @@ void Benchmark::endStep(long step, int bench_interval,
 
     pr(WALL);
     {
-      double halo_total = metric_ms[HALO_PACK] + metric_ms[HALO_PEER];
-      printf("  %-10s %7.2f ms  (pack=%.2f  peer=%.2f  ghosts=%d)\n",
-             "halo", halo_total, metric_ms[HALO_PACK],
-             metric_ms[HALO_PEER], cur_ghosts_);
+      printf("  %-10s %7.2f ms  (ghosts=%d)\n",
+             "halo", metric_ms[HALO_PACK], cur_ghosts_);
     }
     pr(ASSIGN);
     printf("  %-10s %7.2f ms  (contacts=%d)\n",
@@ -251,7 +246,7 @@ void Benchmark::endStep(long step, int bench_interval,
   // ── write CSV row ─────────────────────────────────────────────────────
   if (csv_.is_open() && (bench_interval <= 0 || step % bench_interval == 0)) {
     if (!csv_header_written_) {
-      csv_ << "step,wall_ms,halo_pack_ms,halo_peer_ms,halo_ghosts,"
+      csv_ << "step,wall_ms,halo_ms,halo_ghosts,"
               "assign_ms,force_ms,force_contacts,integrate_ms,"
               "sync_ms,mig_dl_ms,mig_merge_ms,mig_ul_ms,mig_crossed,"
               "vtk_ms";
@@ -265,7 +260,6 @@ void Benchmark::endStep(long step, int bench_interval,
          << std::fixed << std::setprecision(3)
          << metric_ms[WALL] << ","
          << metric_ms[HALO_PACK] << ","
-         << metric_ms[HALO_PEER] << ","
          << cur_ghosts_ << ","
          << metric_ms[ASSIGN] << ","
          << metric_ms[FORCE] << ","
@@ -311,15 +305,12 @@ void Benchmark::printFinal() const {
 
   pr(WALL, false);
   {
-    double halo_total = acc_[HALO_PACK].total + acc_[HALO_PEER].total;
-    long halo_n = acc_[HALO_PACK].samples;
-    if (halo_n > 0) {
-      double halo_avg = halo_total / halo_n;
-      double pct = (acc_[WALL].total > 0) ? 100.0 * halo_total / acc_[WALL].total : 0;
-      printf("  avg %-10s %7.2f ms  (%4.1f%%)  [pack=%.3f  peer=%.3f]\n",
-             "halo", halo_avg, pct,
-             acc_[HALO_PACK].total / halo_n,
-             acc_[HALO_PEER].total / halo_n);
+    const Acc &a = acc_[HALO_PACK];
+    if (a.samples > 0) {
+      double avg = a.total / a.samples;
+      double pct = (acc_[WALL].total > 0) ? 100.0 * a.total / acc_[WALL].total : 0;
+      printf("  avg %-10s %7.2f ms  (%4.1f%%)\n",
+             "halo", avg, pct);
     }
   }
   pr(ASSIGN);

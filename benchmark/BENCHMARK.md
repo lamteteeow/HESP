@@ -8,143 +8,94 @@
 | `MIGRATE` | `cpu` | `MIGRATE=gpu` |
 | `DYNAMIC` | `off` | `DYNAMIC=on` |
 
-Default is the slowest, most conservative path. Every `_halogpu` / `_miggpu`
-tag in a CSV filename means an optimisation was explicitly enabled.
+VTK output is disabled (`vtk_interval=0`) — benchmarks measure simulation,
+not I/O.
 
-## CSVs produced
+## Scene
 
-Each run writes one CSV to `benchmark/`.  The filename encodes:
-
+Generate once:
+```bash
+python3 scripts/gen_scale_crossing.py 100000 > scenes/scale100k_crossing.json
 ```
-bench_<scene>_<steps>_gpu<N>_<GPUmodel>_halo<H>_mig<M>.csv
-```
 
-## Test matrix — 4 GPUs
+100,000 particles — 50% in narrow boundary strips with 60 m/s crossing
+velocity, 50% lattice fill.  Radius 0.7 (halo width 1.4), ~10% packing
+fraction.  ~0.5-1.0 ms/step on 1 GPU depending on architecture.
 
-For each hardware target (`a100` NVLink and `rtx3080` PCIe), run all four
-mode combinations:
-
-| # | HALO | MIGRATE | CSV tag | Measures |
-|---|---|---|---|---|
-| **A** | cpu | cpu | `halocpu_migcpu` | Baseline — all CPU, slowest |
-| **B** | gpu | cpu | `halogpu_migcpu` | GPU halo benefit only |
-| **C** | cpu | gpu | `halocpu_miggpu` | GPU migration benefit only |
-| **D** | gpu | gpu | `halogpu_miggpu` | Both optimisations combined |
-
-Plus a single **1-GPU baseline** (no halo, no migration, no communication).
-
-## 1. Single-GPU baseline (run once)
+## 1. Single-GPU baselines
 
 ```bash
-sbatch.tinygpu --gres=gpu:1 scripts/bench.sh crossing_freq 50000 1 100000 0
+sbatch.tinygpu --gres=gpu:a100:1 --partition=a100 scripts/bench.sh scale100k_crossing 5000 1 0 0
+sbatch.tinygpu --gres=gpu:rtx3080:1 --partition=rtx3080 scripts/bench.sh scale100k_crossing 5000 1 0 0
 ```
 
 ## 2. Four-GPU NVLink (A100)
 
 ```bash
-# A — CPU halo + CPU migration (default — no env vars needed)
-sbatch.tinygpu --gres=gpu:a100:4 --partition=a100 scripts/bench.sh \
-  crossing_freq 50000 4 100000 0
+# A — default (CPU halo + CPU migration)
+sbatch.tinygpu --gres=gpu:a100:4 --partition=a100 scripts/bench.sh scale100k_crossing 5000 4 0 0
 
-# B — GPU halo + CPU migration
-HALO=gpu sbatch.tinygpu --gres=gpu:a100:4 --partition=a100 scripts/bench.sh \
-  crossing_freq 50000 4 100000 0
+# B — GPU halo
+HALO=gpu sbatch.tinygpu --gres=gpu:a100:4 --partition=a100 scripts/bench.sh scale100k_crossing 5000 4 0 0
 
-# C — CPU halo + GPU migration
-MIGRATE=gpu sbatch.tinygpu --gres=gpu:a100:4 --partition=a100 scripts/bench.sh \
-  crossing_freq 50000 4 100000 0
+# C — GPU migration
+MIGRATE=gpu sbatch.tinygpu --gres=gpu:a100:4 --partition=a100 scripts/bench.sh scale100k_crossing 5000 4 0 0
 
-# D — GPU halo + GPU migration
-HALO=gpu MIGRATE=gpu sbatch.tinygpu --gres=gpu:a100:4 --partition=a100 \
-  scripts/bench.sh crossing_freq 50000 4 100000 0
+# D — Both
+HALO=gpu MIGRATE=gpu sbatch.tinygpu --gres=gpu:a100:4 --partition=a100 scripts/bench.sh scale100k_crossing 5000 4 0 0
 ```
 
 ## 3. Four-GPU PCIe (RTX 3080)
 
-```bash
-# A — CPU halo + CPU migration
-sbatch.tinygpu --gres=gpu:rtx3080:4 --partition=rtx3080 scripts/bench.sh \
-  crossing_freq 50000 4 100000 0
+Same four variants with `--gres=gpu:rtx3080:4 --partition=rtx3080`.
 
-# B — GPU halo + CPU migration
-HALO=gpu sbatch.tinygpu --gres=gpu:rtx3080:4 --partition=rtx3080 \
-  scripts/bench.sh crossing_freq 50000 4 100000 0
-
-# C — CPU halo + GPU migration
-MIGRATE=gpu sbatch.tinygpu --gres=gpu:rtx3080:4 --partition=rtx3080 \
-  scripts/bench.sh crossing_freq 50000 4 100000 0
-
-# D — GPU halo + GPU migration
-HALO=gpu MIGRATE=gpu sbatch.tinygpu --gres=gpu:rtx3080:4 --partition=rtx3080 \
-  scripts/bench.sh crossing_freq 50000 4 100000 0
-```
-
-## 4. Compare results
-
-After all jobs finish, diff the CSVs in pairs that isolate one variable:
-
-### 4a. Halo: CPU vs GPU (A → B)
+## Compare
 
 ```bash
+# Halo benefit (cpu vs gpu)
 python3 scripts/compare_bench.py \
-  benchmark/bench_crossing_freq_50000_gpu4_A100_halocpu_migcpu.csv \
-  benchmark/bench_crossing_freq_50000_gpu4_A100_halogpu_migcpu.csv
-```
+  benchmark/bench_scale100k_crossing_5000_gpu4_A100_halocpu_migcpu.csv \
+  benchmark/bench_scale100k_crossing_5000_gpu4_A100_halogpu_migcpu.csv
 
-### 4b. Migration: CPU vs GPU (A → C)
-
-```bash
+# Migration benefit
 python3 scripts/compare_bench.py \
-  benchmark/bench_crossing_freq_50000_gpu4_A100_halocpu_migcpu.csv \
-  benchmark/bench_crossing_freq_50000_gpu4_A100_halocpu_miggpu.csv
-```
+  benchmark/bench_scale100k_crossing_5000_gpu4_A100_halocpu_migcpu.csv \
+  benchmark/bench_scale100k_crossing_5000_gpu4_A100_halocpu_miggpu.csv
 
-### 4c. Both optimisations combined (A → D)
-
-```bash
+# Both optimisations
 python3 scripts/compare_bench.py \
-  benchmark/bench_crossing_freq_50000_gpu4_A100_halocpu_migcpu.csv \
-  benchmark/bench_crossing_freq_50000_gpu4_A100_halogpu_miggpu.csv
-```
+  benchmark/bench_scale100k_crossing_5000_gpu4_A100_halocpu_migcpu.csv \
+  benchmark/bench_scale100k_crossing_5000_gpu4_A100_halogpu_miggpu.csv
 
-### 4d. NVLink vs PCIe (same config, different hardware)
-
-```bash
+# NVLink vs PCIe
 python3 scripts/compare_bench.py \
-  benchmark/bench_crossing_freq_50000_gpu4_A100_halogpu_miggpu.csv \
-  benchmark/bench_crossing_freq_50000_gpu4_RTX3080_halogpu_miggpu.csv
-```
+  benchmark/bench_scale100k_crossing_5000_gpu4_A100_halogpu_miggpu.csv \
+  benchmark/bench_scale100k_crossing_5000_gpu4_RTX3080_halogpu_miggpu.csv
 
-### 4e. 1-GPU vs 4-GPU scaling
-
-```bash
+# 1-GPU vs 4-GPU scaling (A100)
 python3 scripts/compare_bench.py \
-  benchmark/bench_crossing_freq_50000_gpu1_RTX3080_halocpu_migcpu.csv \
-  benchmark/bench_crossing_freq_50000_gpu4_RTX3080_halogpu_miggpu.csv
+  benchmark/bench_scale100k_crossing_5000_gpu1_A100_halocpu_migcpu.csv \
+  benchmark/bench_scale100k_crossing_5000_gpu4_A100_halogpu_miggpu.csv
+
+# 1-GPU vs 4-GPU scaling (RTX 3080)
+python3 scripts/compare_bench.py \
+  benchmark/bench_scale100k_crossing_5000_gpu1_RTX3080_halocpu_migcpu.csv \
+  benchmark/bench_scale100k_crossing_5000_gpu4_RTX3080_halogpu_miggpu.csv
 ```
 
-## Expected CSV outputs (9 files)
+## Expected CSVs (10 files)
 
 ```
-bench_crossing_freq_50000_gpu1_RTX3080_halocpu_migcpu.csv
+bench_scale100k_crossing_5000_gpu1_A100_halocpu_migcpu.csv
+bench_scale100k_crossing_5000_gpu1_RTX3080_halocpu_migcpu.csv
 
-bench_crossing_freq_50000_gpu4_A100_halocpu_migcpu.csv
-bench_crossing_freq_50000_gpu4_A100_halogpu_migcpu.csv
-bench_crossing_freq_50000_gpu4_A100_halocpu_miggpu.csv
-bench_crossing_freq_50000_gpu4_A100_halogpu_miggpu.csv
+bench_scale100k_crossing_5000_gpu4_A100_halocpu_migcpu.csv
+bench_scale100k_crossing_5000_gpu4_A100_halogpu_migcpu.csv
+bench_scale100k_crossing_5000_gpu4_A100_halocpu_miggpu.csv
+bench_scale100k_crossing_5000_gpu4_A100_halogpu_miggpu.csv
 
-bench_crossing_freq_50000_gpu4_RTX3080_halocpu_migcpu.csv
-bench_crossing_freq_50000_gpu4_RTX3080_halogpu_migcpu.csv
-bench_crossing_freq_50000_gpu4_RTX3080_halocpu_miggpu.csv
-bench_crossing_freq_50000_gpu4_RTX3080_halogpu_miggpu.csv
+bench_scale100k_crossing_5000_gpu4_RTX3080_halocpu_migcpu.csv
+bench_scale100k_crossing_5000_gpu4_RTX3080_halogpu_migcpu.csv
+bench_scale100k_crossing_5000_gpu4_RTX3080_halocpu_miggpu.csv
+bench_scale100k_crossing_5000_gpu4_RTX3080_halogpu_miggpu.csv
 ```
-
-## Target metrics
-
-| Metric | 1-GPU | 4-GPU NVLink | 4-GPU PCIe |
-|---|---|---|---|
-| Wall clock (ms) | T₁ | T₄ | T₄ |
-| Scaling efficiency | — | T₁/(4×T₄) | T₁/(4×T₄) |
-| Halo cost (% step) | 0 | see A→B diff | see A→B diff |
-| Migrate cost, idle (% step) | 0 | < 0.1% | < 0.1% |
-| Migrate cost, crossing (ms) | 0 | see C→D diff | see C→D diff |

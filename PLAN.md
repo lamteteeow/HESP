@@ -77,21 +77,18 @@ CUDA events are per-device. Timing across multiple GPUs requires care:
 | Metric | Source | Unit | Aggregation |
 |---|---|---|---|
 | Step time (total, end-to-end) | `std::chrono` host timer | ms | — |
-| Halo - pack kernel | `cudaEvent` per GPU | ms | max across GPUs |
-| Halo - `cudaMemcpyPeer` | `cudaEvent` per GPU | ms | max across GPUs |
-| Halo - total | Sum of above | ms | — |
+| Halo - total | host timer | ms | — |
+| Halo - ghosts transferred | `exchangeHalos()` count × 2 (send+recv) | count | — |
 | Force kernel | `cudaEvent` per GPU | ms | max across GPUs |
 | Cell assignment | `cudaEvent` per GPU | ms | max across GPUs |
 | Integration | `cudaEvent` per GPU | ms | max across GPUs |
 | Sync (GPU straggler wait) | host timer | ms | — |
-| Migration - GPU→CPU download | `cudaEvent` per GPU | ms | sum across GPUs |
-| Migration - CPU merge+split | `std::chrono` host timer | ms | — |
-| Migration - CPU→GPU upload | `cudaEvent` per GPU | ms | sum across GPUs |
-| Migration - total | Sum of above | ms | — |
-| VTK output (when triggered) | `cudaEvent` + host timer | ms | — |
+| Migration - CPU: GPU→CPU dl | host timer | ms | — |
+| Migration - CPU: merge+split / GPU: total | host timer | ms | — |
+| Migration - CPU: CPU→GPU ul | host timer | ms | — |
+| VTK output (when triggered) | host timer | ms | — |
 | Particles per GPU | `pds[g].n` | count | — |
 | Migration triggered? | bool per step | yes/no | — |
-| Ghost particles transferred | `exchangeHalos()` count × 2 (send+recv) | count | — |
 | Contact pairs evaluated | persistent atomic counter | count | — |
 | Load variance | `Var(n_g)` across GPUs | count² | — |
 
@@ -101,21 +98,21 @@ CUDA events are per-device. Timing across multiple GPUs requires care:
 ```
 === step 1000 =========================================
   wall        2.55 ms
-  halo        0.12 ms  (pack=0.08  peer=0.04  ghosts=234)
+  halo        0.12 ms  (ghosts=234)
   assign      0.05 ms
   force       0.45 ms  (contacts=12345)
   integrate   0.03 ms
   sync        0.01 ms
-  migrate     0.62 ms  (download=0.30  merge=0.02  upload=0.30) CROSSED
-  vtk         2.10 ms  (frame=50)
+  migrate     0.62 ms  (dl=0.30  merge=0.02  ul=0.30) CROSSED
+  vtk         2.10 ms
   --------------------------
   particles   GPU0:1024 GPU1:1023  var=0.5
 ```
 
 **Per-step machine-readable** (appended to `bench_<scene>.csv`):
 ```csv
-step,wall_ms,halo_pack_ms,halo_peer_ms,halo_ghosts,assign_ms,force_ms,force_contacts,integrate_ms,sync_ms,mig_dl_ms,mig_merge_ms,mig_ul_ms,mig_crossed,vtk_ms,vtk_frame,n_gpu0,n_gpu1,n_gpu2,n_gpu3,load_var
-1000,2.55,0.08,0.04,234,0.05,0.45,12345,0.03,0.01,0.30,0.02,0.30,1,2.10,50,1024,1023,1022,1025,0.5
+step,wall_ms,halo_ms,halo_ghosts,assign_ms,force_ms,force_contacts,integrate_ms,sync_ms,mig_dl_ms,mig_merge_ms,mig_ul_ms,mig_crossed,vtk_ms,n_gpu0,n_gpu1,n_gpu2,n_gpu3,load_var
+1000,2.55,0.12,234,0.05,0.45,12345,0.03,0.01,0.30,0.02,0.30,1,2.10,1024,1023,1022,1025,0.5
 ```
 
 **Final summary** at exit:
@@ -165,8 +162,8 @@ recompiling:
 
 | Variable | Values | Default | Effect |
 |---|---|---|---|
-| `HALO` | `gpu`, `cpu` | `gpu` | GPU packing + `cudaMemcpyPeer` vs CPU download/filter/upload |
-| `MIGRATE` | `cpu`, `gpu` | `cpu` | CPU round-trip vs GPU packing (GPU path: Step 4) |
+| `HALO` | `cpu`, `gpu` | `cpu` | CPU download/filter/upload vs GPU packing + `cudaMemcpyPeer` |
+| `MIGRATE` | `cpu`, `gpu` | `cpu` | CPU round-trip vs GPU packing |
 | `DYNAMIC` | `off`, `on` | `off` | Dynamic domain decomposition (Step 3) |
 
 CSV filenames include mode tags (e.g., `_halocpu`) so different configurations

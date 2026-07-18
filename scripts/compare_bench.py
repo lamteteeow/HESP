@@ -57,7 +57,7 @@ def main():
 
     metrics = [
         ('wall_ms',        'Wall clock',     'ms'),
-        ('halo_pack_ms',   'Halo pack',      'ms'),
+        ('halo_ms',        'Halo',           'ms'),
         ('halo_ghosts',    'Ghosts',         ''),
         ('force_ms',       'Force',          'ms'),
         ('force_contacts', 'Contacts',       ''),
@@ -131,7 +131,7 @@ def main():
             slower = b_name if b_wall > a_wall else a_name
             print(f"\nOverhead ({slower} idle vs other):")
             print(f"  {a_name}: {a_wall:.3f} ms   {b_name}: {b_wall:.3f} ms   delta: {overhead:.3f} ms")
-            h = stats(b_idle, 'halo_pack_ms')
+            h = stats(b_idle, 'halo_ms')
             if h and h['avg'] > 0:
                 print(f"  of which halo: {h['avg']:.3f} ms ({h['avg']/overhead*100:.0f}%)" if overhead > 0 else "")
     print()
