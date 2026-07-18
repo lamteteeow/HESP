@@ -23,8 +23,8 @@ int packStrip(const ParticleDevice &pd, float lo, float hi,
               int axis, HaloPackBuf &buf, dim3 block, size_t buf_off);
 
 // Halo exchange — reads HALO env var:
-//   HALO=gpu (default): GPU packing + cudaMemcpyPeer
-//   HALO=cpu:           download → CPU filter → upload (baseline)
+//   HALO=gpu: GPU packing + cudaMemcpyPeer
+//   HALO=cpu (default): download → CPU filter → upload
 int exchangeHalos(std::vector<ParticleDevice> &pds,
                   const std::vector<Domain> &doms,
                   std::vector<HaloPackBuf> &halo_bufs,
@@ -33,7 +33,7 @@ int exchangeHalos(std::vector<ParticleDevice> &pds,
 // Get current halo mode string (for benchmark labelling)
 inline const char *haloMode() {
   const char *v = getenv("HALO");
-  return (v && strcmp(v, "cpu") == 0) ? "cpu" : "gpu";
+  return (v && strcmp(v, "gpu") == 0) ? "gpu" : "cpu";
 }
 
 #endif // HALO_EXCHANGE_H

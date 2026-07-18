@@ -52,14 +52,34 @@ void Benchmark::init(int num_gpus, const std::string &scene, long max_steps) {
     }
   }
 
-  // Open CSV (with mode tags so different configs don't collide)
+  // Open CSV — always include full mode tags so every file is self-describing
   const char *hm = getenv("HALO");
   const char *mm = getenv("MIGRATE");
-  std::string tag;
-  if (hm && strcmp(hm, "cpu") == 0) tag += "_halocpu";
-  if (mm && strcmp(mm, "gpu") == 0) tag += "_miggpu";
+  const char *dm = getenv("DYNAMIC");
+  const char *h = (hm && strcmp(hm, "gpu") == 0) ? "gpu" : "cpu";
+  const char *m = (mm && strcmp(mm, "gpu") == 0) ? "gpu" : "cpu";
+  const char *d = (dm && strcmp(dm, "on")  == 0) ? "on"  : "off";
+
+  // Query GPU name for the filename — keep it concise
+  cudaDeviceProp prop;
+  cudaGetDeviceProperties(&prop, 0);
+  std::string gpu_name = prop.name;
+  // Strip verbose prefixes
+  for (const char *p : {"NVIDIA ", "Tesla ", "GeForce "})
+    if (gpu_name.compare(0, strlen(p), p) == 0)
+      gpu_name = gpu_name.substr(strlen(p));
+  // Keep only the part before the first hyphen (drop SKU suffix)
+  if (auto pos = gpu_name.find('-'); pos != std::string::npos)
+    gpu_name = gpu_name.substr(0, pos);
+  // Remove spaces
+  gpu_name.erase(std::remove(gpu_name.begin(), gpu_name.end(), ' '),
+                 gpu_name.end());
+
+  std::string tag = std::string("_halo") + h + "_mig" + m;
+  if (strcmp(d, "on") == 0) tag += std::string("_dyn") + d;
   csv_path_ = "benchmark/bench_" + scene + "_" + std::to_string(max_steps)
-            + "_gpu" + std::to_string(num_gpus) + tag + ".csv";
+            + "_gpu" + std::to_string(num_gpus) + "_" + gpu_name + tag
+            + ".csv";
   csv_.open(csv_path_);
   if (!csv_) {
     fprintf(stderr, "\n*** WARNING: cannot open %s for benchmark CSV\n",

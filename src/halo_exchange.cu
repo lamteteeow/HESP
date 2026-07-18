@@ -244,7 +244,7 @@ int exchangeHalos(std::vector<ParticleDevice> &pds,
                   std::vector<HaloPackBuf> &halo_bufs,
                   dim3 block) {
   const char *mode = getenv("HALO");
-  if (mode && strcmp(mode, "cpu") == 0)
-    return exchangeHalosCPU(pds, doms, halo_bufs, block);
-  return exchangeHalosGPU(pds, doms, halo_bufs, block);
+  if (mode && strcmp(mode, "gpu") == 0)
+    return exchangeHalosGPU(pds, doms, halo_bufs, block);
+  return exchangeHalosCPU(pds, doms, halo_bufs, block);
 }

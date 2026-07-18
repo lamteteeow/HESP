@@ -23,14 +23,12 @@ make
 
 Batch submission:
 ```bash
-# A100 (4 GPUs, NVLink)
-sbatch.tinygpu scripts/sbatch_a100.sh scenes/cube256.json 50000 4
-
-# RTX 3080 (8 GPUs)
-sbatch.tinygpu --gres=gpu:rtx3080:8 scripts/sbatch_work.sh scenes/cube256.json 50000 8
-
 # Quick test (1 GPU)
-sbatch.tinygpu scripts/sbatch_work.sh scenes/cube8.json 5000
+sbatch.tinygpu --gres=gpu:1 scripts/bench.sh cube8 5000 1
+
+# Benchmark: see benchmark/BENCHMARK.md for the full runbook
+# Flexible script — override GPU count and env vars:
+HALO=cpu sbatch.tinygpu --gres=gpu:a100:4 --partition=a100 scripts/bench.sh crossing_freq 50000 4
 ```
 
 ## Run
@@ -41,10 +39,11 @@ sbatch.tinygpu scripts/sbatch_work.sh scenes/cube8.json 5000
 
 ## Algorithm
 
-Per step: **halo exchange** (GPU-side packing → `cudaMemcpyPeer`, or CPU fallback) →
+Per step: **halo exchange** (CPU download/filter/upload by default, GPU packing +
+`cudaMemcpyPeer` with `HALO=gpu`) →
 **cell assignment** (27-neighbor grid) → **force computation**
 (spring-dashpot DEM) → **integration** (symplectic Euler, reflective walls) →
-**migration** (GPU-side crossing guard; on crossing steps: CPU round-trip by default,
+**migration** (GPU-side crossing guard; CPU round-trip by default,
 GPU pack+`cudaMemcpyPeer` with `MIGRATE=gpu`).
 
 ### Domain decomposition
@@ -106,31 +105,31 @@ Toggle algorithm variants without recompiling:
 
 | Variable | Values | Default | Effect |
 |---|---|---|---|
-| `HALO` | `gpu`, `cpu` | `gpu` | GPU packing + `cudaMemcpyPeer` vs CPU download/filter/upload |
+| `HALO` | `cpu`, `gpu` | `cpu` | CPU download/filter/upload vs GPU packing + `cudaMemcpyPeer` |
 | `MIGRATE` | `cpu`, `gpu` | `cpu` | CPU round-trip vs GPU pack + `cudaMemcpyPeer` |
 | `DYNAMIC` | `off`, `on` | `off` | Dynamic domain decomposition (not yet implemented) |
 
 Examples:
 
 ```bash
-# GPU halo (default), CPU migration (default)
+# CPU halo + CPU migration (default — no env vars needed)
 ./md3d scenes/crossing_freq.json 5000 2 10000 100
 
-# CPU halo baseline
-HALO=cpu ./md3d scenes/crossing_freq.json 5000 2 10000 100
+# GPU halo
+HALO=gpu ./md3d scenes/crossing_freq.json 5000 2 10000 100
 
-# GPU migration on crossing steps
+# GPU migration
 MIGRATE=gpu ./md3d scenes/crossing_freq.json 5000 2 10000 100
 
 # Full GPU pipeline (halo + migration both on GPU)
 HALO=gpu MIGRATE=gpu ./md3d scenes/crossing_freq.json 5000 2 10000 100
 
-# Compare GPU vs CPU migration
-MIGRATE=cpu ./md3d scenes/crossing_freq.json 5000 2 10000 100
-MIGRATE=gpu ./md3d scenes/crossing_freq.json 5000 2 10000 100
+# Compare GPU vs CPU halo
+HALO=cpu ./md3d scenes/crossing_freq.json 5000 2 10000 100
+HALO=gpu ./md3d scenes/crossing_freq.json 5000 2 10000 100
 python3 scripts/compare_bench.py \
-  benchmark/bench_crossing_freq_5000_gpu2.csv \
-  benchmark/bench_crossing_freq_5000_gpu2_miggpu.csv
+  benchmark/bench_crossing_freq_5000_gpu2_*_halocpu_migcpu.csv \
+  benchmark/bench_crossing_freq_5000_gpu2_*_halogpu_migcpu.csv
 ```
 
 ## ParaView

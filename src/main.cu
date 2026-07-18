@@ -100,7 +100,7 @@ int main(int argc, char **argv) {
     const char *migrate_m = getenv("MIGRATE");
     const char *dynamic_m = getenv("DYNAMIC");
     printf("Modes: halo=%s  migrate=%s  dynamic=%s\n",
-           (halo_m    && strcmp(halo_m,    "cpu") == 0) ? "cpu" : "gpu",
+           (halo_m    && strcmp(halo_m,    "gpu") == 0) ? "gpu" : "cpu",
            (migrate_m && strcmp(migrate_m, "gpu") == 0) ? "gpu" : "cpu",
            (dynamic_m && strcmp(dynamic_m, "on")  == 0) ? "on"  : "off");
 
@@ -204,6 +204,11 @@ int main(int argc, char **argv) {
     for (long step = 0; step < max_steps; ++step) {
       const bool warm = (step >= WARMUP_STEPS);
 
+      // Capture wall-clock start once warmup ends (for progress estimate)
+      static auto t_start_ = std::chrono::steady_clock::now();
+      if (step == WARMUP_STEPS)
+        t_start_ = std::chrono::steady_clock::now();
+
       if (warm) bench.beginStep();
 
       // --- Halo exchange: populate ghost particles on each GPU ---
@@ -281,6 +286,34 @@ int main(int argc, char **argv) {
       // --- Particle migration ---
       Benchmark *bp = warm ? &bench : nullptr;
       migrateParticles(pds, doms, mig_bufs, global.n, bp);
+
+      // --- Progress (10% intervals) ---
+      if (step == 0) {
+        printf("[  0%%] step 0/%ld", max_steps);
+        for (int g = 0; g < num_gpus; ++g)
+          printf("  GPU%d:%zu", g, pds[g].n);
+        printf("\n");
+      } else if (step == max_steps - 1) {
+        printf("[100%%] step %ld/%ld", step, max_steps);
+        auto now = std::chrono::steady_clock::now();
+        double s = std::chrono::duration<double>(now - t_start_).count();
+        printf("  %.2f ms/step", s * 1000.0 / (step - WARMUP_STEPS + 1));
+        for (int g = 0; g < num_gpus; ++g)
+          printf("  GPU%d:%zu", g, pds[g].n);
+        printf("\n");
+      } else if (step > 0) {
+        long pct = (step * 100) / max_steps;
+        long prev_pct = ((step - 1) * 100) / max_steps;
+        if (pct != prev_pct && pct % 10 == 0) {
+          printf("[%3ld%%] step %ld/%ld", pct, step, max_steps);
+          auto now = std::chrono::steady_clock::now();
+          double s = std::chrono::duration<double>(now - t_start_).count();
+          printf("  %.2f ms/step", s * 1000.0 / (step - WARMUP_STEPS + 1));
+          for (int g = 0; g < num_gpus; ++g)
+            printf("  GPU%d:%zu", g, pds[g].n);
+          printf("\n");
+        }
+      }
 
       // --- VTK output ---
       if (step % steps_per_frame == 0) {
