@@ -171,6 +171,15 @@ int main(int argc, char **argv) {
     }
 
     // ------------------------------------------------------------------ //
+    // 4.6  Allocate GPU-side migration buffers (one per GPU)
+    // ------------------------------------------------------------------ //
+    std::vector<MigPackBuf> mig_bufs(num_gpus);
+    for (int g = 0; g < num_gpus; ++g) {
+      CHECK_CUDA(cudaSetDevice(g));
+      allocMigPackBuf(mig_bufs[g], global.n);
+    }
+
+    // ------------------------------------------------------------------ //
     // 5.  Build cell neighbor tables (fixed for the lifetime of the run)
     // ------------------------------------------------------------------ //
     std::vector<int *> d_nb(num_gpus, nullptr);
@@ -271,13 +280,7 @@ int main(int argc, char **argv) {
 
       // --- Particle migration ---
       Benchmark *bp = warm ? &bench : nullptr;
-      migrateParticles(pds, doms, global.n, bp);
-      // Record whether migration crossed (inferred from download time > 0
-      // inside migrateParticles — we track via the bench pointer).
-      // For now we count it in bench; a simple heuristic: if any GPU's n
-      // changed since last VTK frame we could track, but the bench
-      // auto-detects from MIG_DOWNLOAD time.  We rely on migrateParticles
-      // having called bench->startHost/stopHost.
+      migrateParticles(pds, doms, mig_bufs, global.n, bp);
 
       // --- VTK output ---
       if (step % steps_per_frame == 0) {
@@ -391,6 +394,7 @@ int main(int argc, char **argv) {
       freeParticleDevice(pds[g]);
       CHECK_CUDA(cudaFree(d_nb[g]));
       freeHaloPackBuf(halo_bufs[g]);
+      freeMigPackBuf(mig_bufs[g]);
     }
 
   } catch (const std::exception &e) {

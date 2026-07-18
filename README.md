@@ -41,10 +41,11 @@ sbatch.tinygpu scripts/sbatch_work.sh scenes/cube8.json 5000
 
 ## Algorithm
 
-Per step: **halo exchange** (GPU-side packing → `cudaMemcpyPeer`) →
+Per step: **halo exchange** (GPU-side packing → `cudaMemcpyPeer`, or CPU fallback) →
 **cell assignment** (27-neighbor grid) → **force computation**
 (spring-dashpot DEM) → **integration** (symplectic Euler, reflective walls) →
-**migration** (redistribution across GPU grid, GPU-side crossing guard).
+**migration** (GPU-side crossing guard; on crossing steps: CPU round-trip by default,
+GPU pack+`cudaMemcpyPeer` with `MIGRATE=gpu`).
 
 ### Domain decomposition
 
@@ -106,24 +107,30 @@ Toggle algorithm variants without recompiling:
 | Variable | Values | Default | Effect |
 |---|---|---|---|
 | `HALO` | `gpu`, `cpu` | `gpu` | GPU packing + `cudaMemcpyPeer` vs CPU download/filter/upload |
-| `MIGRATE` | `cpu`, `gpu` | `cpu` | CPU round-trip vs GPU packing (GPU path not yet implemented) |
+| `MIGRATE` | `cpu`, `gpu` | `cpu` | CPU round-trip vs GPU pack + `cudaMemcpyPeer` |
 | `DYNAMIC` | `off`, `on` | `off` | Dynamic domain decomposition (not yet implemented) |
 
 Examples:
 
 ```bash
-# GPU halo (default)
+# GPU halo (default), CPU migration (default)
 ./md3d scenes/crossing_freq.json 5000 2 10000 100
 
 # CPU halo baseline
 HALO=cpu ./md3d scenes/crossing_freq.json 5000 2 10000 100
 
-# Compare GPU vs CPU halo
-HALO=gpu ./md3d scenes/crossing_freq.json 5000 2 10000 100
-HALO=cpu ./md3d scenes/crossing_freq.json 5000 2 10000 100
+# GPU migration on crossing steps
+MIGRATE=gpu ./md3d scenes/crossing_freq.json 5000 2 10000 100
+
+# Full GPU pipeline (halo + migration both on GPU)
+HALO=gpu MIGRATE=gpu ./md3d scenes/crossing_freq.json 5000 2 10000 100
+
+# Compare GPU vs CPU migration
+MIGRATE=cpu ./md3d scenes/crossing_freq.json 5000 2 10000 100
+MIGRATE=gpu ./md3d scenes/crossing_freq.json 5000 2 10000 100
 python3 scripts/compare_bench.py \
   benchmark/bench_crossing_freq_5000_gpu2.csv \
-  benchmark/bench_crossing_freq_5000_gpu2_halocpu.csv
+  benchmark/bench_crossing_freq_5000_gpu2_miggpu.csv
 ```
 
 ## ParaView
@@ -141,11 +148,11 @@ python3 scripts/compare_bench.py \
 | `main.cu` | Entry point, simulation loop |
 | `domain.h` / `domain.cu` | 3D grid decomposition |
 | `halo_exchange.h` / `halo_exchange.cu` | GPU-side packing + `cudaMemcpyPeer` |
-| `pack_halo.cuh` / `pack_halo.cu` | Pack kernel (atomic-add compaction) |
+| `pack_halo.cuh` / `pack_halo.cu` | Halo pack kernel (atomic-add compaction) |
 | `force_kernels.cuh` / `force_kernels.cu` | DEM contact forces |
 | `integration.cuh` / `integration.cu` | Symplectic Euler, reflective walls |
-| `migration.h` / `migration.cu` | GPU-guarded redistribution |
-| `pack_migrate.cuh` / `pack_migrate.cu` | GPU-side crossing check kernel |
+| `migration.h` / `migration.cu` | GPU-guarded redistribution (CPU or GPU path) |
+| `pack_migrate.cuh` / `pack_migrate.cu` | Crossing-check, pack-migrants, compact-stayers kernels |
 | `benchmark.h` / `benchmark.cu` | Per-step timing + CSV output |
 | `vtk_output.h` / `vtk_output.cu` | VTK output + domain boundary viz |
 | `input.h` / `input.cu` | JSON scene loading |

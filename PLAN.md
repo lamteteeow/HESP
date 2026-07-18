@@ -1,5 +1,7 @@
 # Implementation Plan
 
+**Status:** Steps 0–2 ✅ · Step 3 ⬜ · Step 4 ✅ · S2–S5 scenes ⬜
+
 ## 0. Principle
 
 **Benchmark first, optimize second, verify third.** Every change must be
@@ -301,7 +303,7 @@ implemented **before** Section 4 to keep idle-step migration cost low.
 
 ---
 
-## 5. Full GPU-side Migration (Pack + cudaMemcpyPeer)
+## 5. Full GPU-side Migration (Pack + cudaMemcpyPeer) ✅ IMPLEMENTED
 
 ### 5.1 Prerequisites
 
@@ -326,30 +328,27 @@ Where H = number of particles that actually crossed (usually << N).
 
 ### 5.4 Algorithm Outline
 
-1. **Pack migrated-out**: for each GPU, pack particles that left its owned
-   region into per-target-GPU output buffers. Unlike halo (6 directions
-   based on neighbor topology), migration sends directly to the correct
-   destination GPU — up to `num_gpus − 1` output buffers per source GPU.
-2. **cudaMemcpyPeer** each packed buffer to the target GPU's receive buffer.
-3. **Important**: `gamma_t` and `mu` must be transferred (unlike halo
-   exchange where they can fall back to particle-i values). These are
-   owned-only arrays (`capacity/2` size), so the pack kernel must read
-   from the owned-only arrays and the destination must write to its
-   owned-only arrays.
-4. **Compact stayers**: pack particles that remained in their owned region
-   into a contiguous prefix of the particle arrays (since migrating-out
-   particles leave gaps). Use the stale halo region (`[n, n_total)`)
-   as temporary workspace.
-5. **Append migrants**: copy received particles after the compacted stayers.
-6. **Swap / finalise**: update `n` and `n_total` on each GPU.
+1. **Compact stayers**: each GPU packs particles that stayed in-region into a
+   per-GPU temp buffer (contiguous prefix). Original data is preserved for
+   step 2.
+2. **Pack migrants + cudaMemcpyPeer**: for each (src, dst) pair, launch
+   `packMigrants` kernel on src to pack particles that moved into dst's owned
+   region, then `cudaMemcpyPeer` to append them after dst's compacted stayers
+   in dst's temp buffer.
+3. **Copy temp → main arrays**: each GPU copies its temp buffer back to the
+   main particle arrays and updates `n`, `n_total`.
+4. **All fields transferred**: positions, velocities, masses, radii, kn,
+   gamma_n, gamma_t, mu, ids. Forces are recomputed each step and not transferred.
 
-### 5.5 Complexity / Risk
+### 5.5 Implementation Notes
 
-- Most complex change in this plan. Introduces new packing kernels, per-GPU
-  buffer management, and pointer updates.
-- Only worth doing if Sections 3 + 4 still leave measurable migration cost
-  on crossing steps.
-- **Defer until benchmarks prove it's needed.**
+- Two new kernels in `pack_migrate.cuh`/`pack_migrate.cu`: `packMigrants`
+  and `compactStayers` (in addition to the existing `checkMigration`).
+- `MigPackBuf` struct holds per-GPU send buffer and temp workspace, allocated
+  once at startup in `main.cu`.
+- Dispatched behind `MIGRATE=gpu` env var. CPU path (`MIGRATE=cpu`) unchanged.
+- Crossing check (Section 3) still runs first on both paths — idle steps skip
+  migration entirely.
 
 ### 5.6 Decision Gate
 
@@ -357,8 +356,9 @@ Where H = number of particles that actually crossed (usually << N).
 exceeds 5% of step time for relevant workloads.
 
 ### 5.7 Files
-- `src/migration.h` / `src/migration.cu` — rewrite
-- `src/pack_migrate.cuh` / `src/pack_migrate.cu` (new) — pack kernels
+- `src/migration.h` / `src/migration.cu` — rewritten
+- `src/pack_migrate.cuh` / `src/pack_migrate.cu` — pack + compact kernels
+- `src/main.cu` — buffer allocation + updated call site
 
 ---
 
@@ -435,7 +435,7 @@ exceeds 5% of step time for relevant workloads.
 | 1 | `src/benchmark.h`, `src/benchmark.cu` | `src/main.cu`, `Makefile` |
 | 2 | `src/pack_migrate.cuh`, `src/pack_migrate.cu` | `src/migration.h`, `src/migration.cu`, `src/particle_device.cuh`, `src/particle_host.h`, `src/particle_host.cu` |
 | 3 | — | `src/domain.h`, `src/domain.cu`, `src/main.cu` |
-| 4 | — | `src/migration.h`, `src/migration.cu`, `src/pack_migrate.cuh`, `src/pack_migrate.cu` |
+| 4 | — | `src/migration.h`, `src/migration.cu`, `src/pack_migrate.cuh`, `src/pack_migrate.cu`, `src/main.cu` |
 
 ---
 
