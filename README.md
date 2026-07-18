@@ -34,8 +34,11 @@ HALO=cpu sbatch.tinygpu --gres=gpu:a100:4 --partition=a100 scripts/bench.sh cros
 ## Run
 
 ```bash
-./md3d scenes/cube256.json 5000 8 5 100   # scene, steps, GPUs, VTK interval, bench interval
+./md3d scenes/cube256.json 5000 4 0 0   # vtk_interval=0 → no VTK, bench_interval=0 → summary only
 ```
+
+Set `vtk_interval=0` to disable VTK output entirely (benchmarks). Set `bench_interval=0`
+for final-summary-only (no per-step blocks).
 
 ## Algorithm
 
