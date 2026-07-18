@@ -196,18 +196,18 @@ void Benchmark::endStep(long step, int bench_interval,
 
     auto pr = [&](Metric m, const char *extra = nullptr) {
       if (acc_[m].samples == 0) return;
-      printf("  %-10s %7.2f ms", metricName(m), metric_ms[m]);
+      printf("  %-10s %7.3f ms", metricName(m), metric_ms[m]);
       if (extra) printf("  (%s)", extra);
       printf("\n");
     };
 
     pr(WALL);
     {
-      printf("  %-10s %7.2f ms  (ghosts=%d)\n",
+      printf("  %-10s %7.3f ms  (ghosts=%d)\n",
              "halo", metric_ms[HALO_PACK], cur_ghosts_);
     }
     pr(ASSIGN);
-    printf("  %-10s %7.2f ms  (contacts=%d)\n",
+    printf("  %-10s %7.3f ms  (contacts=%d)\n",
            metricName(FORCE), metric_ms[FORCE], cur_contacts_);
     pr(INTEGRATE);
     pr(SYNC);
@@ -216,7 +216,7 @@ void Benchmark::endStep(long step, int bench_interval,
       double mig_total = metric_ms[MIG_DOWNLOAD] + metric_ms[MIG_MERGE]
                        + metric_ms[MIG_UPLOAD];
       const char *tag = cur_mig_crossed_ ? "CROSSED" : "idle";
-      printf("  %-10s %7.2f ms  (dl=%.2f  merge=%.2f  ul=%.2f) %s\n",
+      printf("  %-10s %7.3f ms  (dl=%.3f  merge=%.3f  ul=%.3f) %s\n",
              "migrate", mig_total, metric_ms[MIG_DOWNLOAD],
              metric_ms[MIG_MERGE], metric_ms[MIG_UPLOAD], tag);
     }
@@ -257,7 +257,7 @@ void Benchmark::endStep(long step, int bench_interval,
     }
 
     csv_ << step << ","
-         << std::fixed << std::setprecision(3)
+         << std::fixed << std::setprecision(5)
          << metric_ms[WALL] << ","
          << metric_ms[HALO_PACK] << ","
          << cur_ghosts_ << ","
@@ -298,7 +298,7 @@ void Benchmark::printFinal() const {
     double avg = a.total / a.samples;
     double pct = (acc_[WALL].samples > 0)
                    ? 100.0 * a.total / acc_[WALL].total : 0;
-    printf("  avg %-10s %7.2f ms", metricName(m), avg);
+    printf("  avg %-10s %7.3f ms", metricName(m), avg);
     if (show_pct) printf("  (%4.1f%%)", pct);
     printf("  [min=%.3f  max=%.3f  n=%ld]\n", a.minv, a.maxv, a.samples);
   };
@@ -309,7 +309,7 @@ void Benchmark::printFinal() const {
     if (a.samples > 0) {
       double avg = a.total / a.samples;
       double pct = (acc_[WALL].total > 0) ? 100.0 * a.total / acc_[WALL].total : 0;
-      printf("  avg %-10s %7.2f ms  (%4.1f%%)\n",
+      printf("  avg %-10s %7.3f ms  (%4.1f%%)\n",
              "halo", avg, pct);
     }
   }
@@ -326,7 +326,7 @@ void Benchmark::printFinal() const {
     if (mig_n > 0) {
       double mig_avg = mig_total / mig_n;
       double pct = (acc_[WALL].total > 0) ? 100.0 * mig_total / acc_[WALL].total : 0;
-      printf("  avg %-10s %7.2f ms  (%4.1f%%)  [dl=%.3f  merge=%.3f  ul=%.3f]",
+      printf("  avg %-10s %7.3f ms  (%4.1f%%)  [dl=%.3f  merge=%.3f  ul=%.3f]",
              "migrate", mig_avg, pct,
              acc_[MIG_DOWNLOAD].samples > 0 ? acc_[MIG_DOWNLOAD].total / acc_[MIG_DOWNLOAD].samples : 0,
              acc_[MIG_MERGE].samples    > 0 ? acc_[MIG_MERGE].total    / acc_[MIG_MERGE].samples    : 0,
@@ -340,7 +340,7 @@ void Benchmark::printFinal() const {
     double vtk_amort  = acc_[VTK].total / steps_;
     double pct_out = (acc_[WALL].total > 0) ? 100.0 * acc_[VTK].total / acc_[WALL].total : 0;
     double pct_amort = (acc_[WALL].total > 0) ? 100.0 * vtk_amort * steps_ / acc_[WALL].total : 0;
-    printf("  avg %-10s %7.2f ms  (%4.1f%%)  [per-output=%.2f ms  amort=%.3f ms  frames=%ld]\n",
+    printf("  avg %-10s %7.3f ms  (%4.1f%%)  [per-output=%.3f ms  amort=%.3f ms  frames=%ld]\n",
            "vtk", vtk_per_out, pct_out, vtk_per_out,
            acc_[VTK].total / steps_, acc_[VTK].samples);
   }
