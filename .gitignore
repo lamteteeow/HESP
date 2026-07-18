@@ -12,6 +12,9 @@
 references/
 images/
 presentation/
+# Slurm output artefacts
+md3d.o*
+slurm-*.out
 
 # User-specific files (MonoDevelop/Xamarin Studio)
 *.userprefs
