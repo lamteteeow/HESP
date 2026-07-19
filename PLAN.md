@@ -166,9 +166,7 @@ recompiling:
 | `MIGRATE` | `cpu`, `gpu` | `cpu` | CPU round-trip vs GPU packing |
 | `DYNAMIC` | `off`, `on` | `off` | Dynamic domain decomposition (Step 3) |
 
-CSV filenames include mode tags (e.g., `_halocpu`) so different configurations
-produce separate output files without overwriting. The startup banner prints
-the active configuration: `Modes: halo=gpu  migrate=cpu  dynamic=off`.
+
 
 ---
 
@@ -235,10 +233,9 @@ after benchmarking baseline.**
 
 ## 4. Dynamic Domain Decomposition ✅ IMPLEMENTED (greedy nudging)
 
-Implementation uses greedy boundary nudging (simpler than the histogram
-approach below): each rebalance interval, boundaries shift by ±cell_size
-toward the heavier side.  No new GPU kernels.  Converges gradually, no
-oscillation.  See `domain.cu:rebalanceDomains()`.
+Greedy boundary nudging: each rebalance interval, boundaries shift by
+±cell_size toward the heavier side.  No new GPU kernels.  Converges gradually,
+no oscillation.  See `domain.cu:rebalanceDomains()`.
 
 ### 4.1 Current Behavior (to be measured by Section 2)
 
@@ -254,31 +251,17 @@ to `(max_n - mean_n) / max_n`. Impact is proportional to load imbalance.
 
 ### 4.3 Algorithm
 
-**Trigger**: every `rebalance_interval` steps (default 100), if load variance
-exceeds a threshold (e.g., `max_n > 1.2 × mean_n`). Use hysteresis: don't
-rebalance again until variance has been above threshold for 2 consecutive
-checks, and don't rebalance if the improvement would be < 5%.
+**Trigger**: every `rebalance_interval` steps (default 100), if `max(n_g) > 1.15 × mean(n_g)`.
 
-**X-axis rebalancing**:
-1. Collect `n_g` per GPU (already available).
-2. Sort particle positions on each GPU and gather to host (required for
-   precise boundary placement — this is the main cost).
-3. Compute new boundaries via **binary search** over the global sorted
-   position list: find X coordinates where the cumulative particle count
-   crosses `g × target_per_gpu` for `g = 1..num_gpus-1`.
-4. Apply to `Domain` structs: update `owned_min.x`/`owned_max.x`,
-   recalculate `local_min`/`local_max`, `num_cells`, `total_cells`.
-5. Allocate cell arrays for the **maximum possible** `total_cells` at startup
-   to avoid mid-run `cudaFree`/`cudaMalloc`. If the new `total_cells` still
-   fits within the pre-allocated size, reuse the buffers.
-6. Recompute and re-upload the cell neighborhood table (`d_nb`) only if
-   `total_cells` actually grew beyond the pre-allocated maximum.
-7. Trigger migration to redistribute particles per new boundaries.
+**Greedy nudging** — for each boundary between GPU `g` and `g+1`:
+- If `n_g > n_{g+1}`, shift the boundary by `+cell_size` (moving owned cells
+  from `g` to `g+1`).
+- If `n_g < n_{g+1}`, shift by `-cell_size`.
+- Capped at 1 cell per interval to prevent oscillation.
 
-**3D (MD3D, deferred)**: adjust X boundaries within each YZ-column. Since
-halo exchange assumes axis-aligned rectangular owned regions, boundaries
-must be aligned across columns. This requires a global constraint that
-limits flexibility. Full 3D repartitioning is future work.
+Updates are applied to `Domain` structs (`owned_min`/`owned_max`). Cell arrays
+are reallocated if `total_cells` exceeds pre-allocated capacity. No new GPU
+kernels required. See `domain.cu:rebalanceDomains()`.
 
 ### 4.4 Expected Impact
 
@@ -288,38 +271,21 @@ limits flexibility. Full 3D repartitioning is future work.
 | Force kernel time | limited by max | limited by avg | up to delta/N % |
 | Load variance | measured | → near 0 | |
 
-### 4.5 Decision Gate
-
-**Only implement if** benchmarks from Section 2 show load variance
-`max(n_g) / mean(n_g) > 1.15` for a significant fraction of steps.
-
-### 4.6 Interaction with Section 3
-
-Dynamic decomposition **increases** migration frequency (moving boundaries
-forces particle redistribution). Section 3 (GPU crossing check) should be
-implemented **before** Section 4 to keep idle-step migration cost low.
-
-### 4.7 Files
+### 4.5 Files
 - `src/domain.h` / `src/domain.cu` — `rebalanceDomains()` function
-- `src/main.cu` — trigger + stats
+- `src/main.cu` — trigger + load-variance logging
 
 ---
 
 ## 5. Full GPU-side Migration (Pack + cudaMemcpyPeer) ✅ IMPLEMENTED
 
-### 5.1 Prerequisites
-
-- Section 2 (benchmarking) — to verify GPU migration is actually faster.
-- Section 3 (crossing check) — already eliminates downloads on idle steps.
-- Section 4 (dynamic decomposition) — may affect migration patterns.
-
-### 5.2 Hypothesis
+### 5.1 Hypothesis
 
 When migration DOES trigger, the current CPU round-trip still costs O(N)
 PCIe transfers. A GPU-side approach using pack kernels + `cudaMemcpyPeer`
 keeps data on-device, transferring only particles that actually crossed.
 
-### 5.3 Expected Impact
+### 5.2 Expected Impact
 
 | Metric | Before | After | Delta |
 |---|---|---|---|
@@ -328,7 +294,7 @@ keeps data on-device, transferring only particles that actually crossed.
 
 Where H = number of particles that actually crossed (usually << N).
 
-### 5.4 Algorithm Outline
+### 5.3 Algorithm Outline
 
 1. **Compact stayers**: each GPU packs particles that stayed in-region into a
    per-GPU temp buffer (contiguous prefix). Original data is preserved for
@@ -342,7 +308,7 @@ Where H = number of particles that actually crossed (usually << N).
 4. **All fields transferred**: positions, velocities, masses, radii, kn,
    gamma_n, gamma_t, mu, ids. Forces are recomputed each step and not transferred.
 
-### 5.5 Implementation Notes
+### 5.4 Implementation Notes
 
 - Two new kernels in `pack_migrate.cuh`/`pack_migrate.cu`: `packMigrants`
   and `compactStayers` (in addition to the existing `checkMigration`).
@@ -352,12 +318,7 @@ Where H = number of particles that actually crossed (usually << N).
 - Crossing check (Section 3) still runs first on both paths — idle steps skip
   migration entirely.
 
-### 5.6 Decision Gate
-
-**Only implement if** after Sections 3 and 4, migration cost on crossing steps
-exceeds 5% of step time for relevant workloads.
-
-### 5.7 Files
+### 5.5 Files
 - `src/migration.h` / `src/migration.cu` — rewritten
 - `src/pack_migrate.cuh` / `src/pack_migrate.cu` — pack + compact kernels
 - `src/main.cu` — buffer allocation + updated call site
@@ -419,25 +380,6 @@ exceeds 5% of step time for relevant workloads.
                     │                │  │   migration      │
                     └────────────────┘  └──────────────────┘
 ```
-
-**Summary of decision gates:**
-
-| Check | Threshold | Action |
-|---|---|---|
-| Step 1 complete? | Baseline collected | → always proceed to Step 2 |
-| Step 2 implement? | Always | No downside, unconditional |
-| Step 3 implement? | Load variance > 15% | Dynamic decomposition |
-| Step 4 implement? | Migration cost on crossing steps > 5% | GPU-side migration |
-
-### 6.1 File Map
-
-| Step | New Files | Modified Files |
-|---|---|---|
-| 0 | — | `src/main.cu`, `src/particle_device.cuh`, `src/particle_host.h`, `src/particle_host.cu` |
-| 1 | `src/benchmark.h`, `src/benchmark.cu` | `src/main.cu`, `Makefile` |
-| 2 | `src/pack_migrate.cuh`, `src/pack_migrate.cu` | `src/migration.h`, `src/migration.cu`, `src/particle_device.cuh`, `src/particle_host.h`, `src/particle_host.cu` |
-| 3 | — | `src/domain.h`, `src/domain.cu`, `src/main.cu` |
-| 4 | — | `src/migration.h`, `src/migration.cu`, `src/pack_migrate.cuh`, `src/pack_migrate.cu`, `src/main.cu` |
 
 ---
 
@@ -551,20 +493,7 @@ Expected: Identifies the crossover where communication cost exceeds
 computation benefit. Determines whether the current approach is
 compute-bound or bandwidth-bound at scale.
 
-### 7.3 Scene Generators
-
-| Generator | Output Scene |
-|---|---|
-| `scripts/gen_crossing_freq.py` | `scenes/crossing_freq.json` |
-| `scripts/gen_clustered.py` | `scenes/all_on_gpu0.json` |
-| `scripts/gen_dense_contacts.py` | `scenes/dense_contacts.json` |
-| `scripts/gen_large_halo.py` | `scenes/large_halo.json` |
-| `scripts/gen_stress_all.py` | `scenes/stress_all.json` |
-
-All generators accept a `--seed` flag (default: fixed constant) for
-deterministic output.
-
-### 7.4 Benchmark Protocol
+### 7.3 Benchmark Protocol
 
 For each test scene, run with 1, 2, 4 GPUs:
 ```

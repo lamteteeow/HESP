@@ -4,6 +4,10 @@ Spring-dashpot DEM (Discrete Element Method) with **nx×ny×nz grid decompositio
 (factored from N GPUs). Each GPU exchanges halo particles in up to 6 directions
 via GPU-side packing + `cudaMemcpyPeer`.
 
+## Demo
+
+![ParaView demo](media/paraview.gif)
+
 ## Build
 
 ```bash
