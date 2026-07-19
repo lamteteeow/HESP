@@ -31,4 +31,15 @@ void factorGrid3D(int n, int &nx, int &ny, int &nz);
 std::vector<Domain> buildDomains(Vec3 gmin, Vec3 gmax, float halo_width,
                                   float cell_size, int num_gpus);
 
+// Recompute derived fields after owned_min/max change.
+void recomputeDomain(Domain &d);
+
+// Greedy boundary nudging: adjust domain boundaries to reduce load
+// imbalance.  Returns true if any boundary moved.
+// n_per_gpu: owned particle count per GPU (pds[g].n).
+// imbalance_threshold: e.g. 0.15 = 15% triggers a nudge.
+bool rebalanceDomains(std::vector<Domain> &doms,
+                      const std::vector<size_t> &n_per_gpu,
+                      float imbalance_threshold = 0.15f);
+
 #endif // DOMAIN_H

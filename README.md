@@ -46,8 +46,18 @@ Per step: **halo exchange** (CPU download/filter/upload by default, GPU packing 
 `cudaMemcpyPeer` with `HALO=gpu`) →
 **cell assignment** (27-neighbor grid) → **force computation**
 (spring-dashpot DEM) → **integration** (symplectic Euler, reflective walls) →
+**dynamic rebalancing** (greedy boundary nudging, `DYNAMIC=on`) →
 **migration** (GPU-side crossing guard; CPU round-trip by default,
 GPU pack+`cudaMemcpyPeer` with `MIGRATE=gpu`).
+
+### Dynamic domain decomposition
+
+When `DYNAMIC=on`, boundaries between GPU domains are nudged by at most one
+cell per rebalance interval (default 100 steps) toward the heavier side.
+No new GPU kernels — sums `pds[g].n` per column/row/slab on the host and
+adjusts `owned_min`/`owned_max` boundaries.  Converges gradually, no
+oscillation.  Cell arrays are reallocated if a GPU's `total_cells` exceeds
+its pre-allocated capacity.
 
 ### Domain decomposition
 
@@ -110,7 +120,7 @@ Toggle algorithm variants without recompiling:
 |---|---|---|---|
 | `HALO` | `cpu`, `gpu` | `cpu` | CPU download/filter/upload vs GPU packing + `cudaMemcpyPeer` |
 | `MIGRATE` | `cpu`, `gpu` | `cpu` | CPU round-trip vs GPU pack + `cudaMemcpyPeer` |
-| `DYNAMIC` | `off`, `on` | `off` | Dynamic domain decomposition (not yet implemented) |
+| `DYNAMIC` | `off`, `on` | `off` | Greedy boundary nudging for load balancing |
 
 Examples:
 
@@ -126,6 +136,9 @@ MIGRATE=gpu ./md3d scenes/crossing_freq.json 5000 2 10000 100
 
 # Full GPU pipeline (halo + migration both on GPU)
 HALO=gpu MIGRATE=gpu ./md3d scenes/crossing_freq.json 5000 2 10000 100
+
+# Dynamic domain rebalancing (every 100 steps, 15% threshold)
+DYNAMIC=on ./md3d scenes/comet100k.json 10000 8 0 0
 
 # Compare GPU vs CPU halo
 HALO=cpu ./md3d scenes/crossing_freq.json 5000 2 10000 100

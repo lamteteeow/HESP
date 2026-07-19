@@ -105,6 +105,7 @@ int main(int argc, char **argv) {
            (halo_m    && strcmp(halo_m,    "gpu") == 0) ? "gpu" : "cpu",
            (migrate_m && strcmp(migrate_m, "gpu") == 0) ? "gpu" : "cpu",
            (dynamic_m && strcmp(dynamic_m, "on")  == 0) ? "on"  : "off");
+    const bool dynamic_on = (dynamic_m && strcmp(dynamic_m, "on") == 0);
 
     // Enable peer access between all GPU pairs (prerequisite for
     // cudaMemcpyPeer). Not all pairs may support it; skip those that don't.
@@ -185,15 +186,19 @@ int main(int argc, char **argv) {
     // 5.  Build cell neighbor tables (fixed for the lifetime of the run)
     // ------------------------------------------------------------------ //
     std::vector<int *> d_nb(num_gpus, nullptr);
+    std::vector<int> cell_caps(num_gpus);   // allocated total_cells per GPU
     for (int g = 0; g < num_gpus; ++g) {
       CHECK_CUDA(cudaSetDevice(g));
       d_nb[g] = uploadNeighborhood(doms[g]);
+      cell_caps[g] = doms[g].total_cells;
     }
 
     // ------------------------------------------------------------------ //
     // 5.5  Benchmark init
     // ------------------------------------------------------------------ //
     const std::string scene = sceneName(argv[1]);
+    const std::string vtk_scene =
+        scene + (dynamic_on ? "_dynon" : "_dynoff");
     Benchmark bench;
     bench.init(num_gpus, scene, max_steps);
 
@@ -284,6 +289,29 @@ int main(int argc, char **argv) {
         CHECK_CUDA(cudaDeviceSynchronize());
       }
       if (warm) bench.stopHost(Benchmark::SYNC);
+
+      // --- Dynamic domain rebalancing ---
+      constexpr int REBALANCE_INTERVAL = 100;
+      if (dynamic_on && step > 0 && step % REBALANCE_INTERVAL == 0) {
+        std::vector<size_t> n_per_gpu(num_gpus);
+        for (int g = 0; g < num_gpus; ++g)
+          n_per_gpu[g] = pds[g].n;
+
+        if (rebalanceDomains(doms, n_per_gpu)) {
+          // Check if any GPU needs cell array reallocation
+          for (int g = 0; g < num_gpus; ++g) {
+            if (doms[g].total_cells > cell_caps[g]) {
+              CHECK_CUDA(cudaSetDevice(g));
+              CHECK_CUDA(cudaFree(d_nb[g]));
+              CHECK_CUDA(cudaFree(pds[g].d_cellHeads));
+              CHECK_CUDA(
+                  cudaMalloc(&pds[g].d_cellHeads, doms[g].total_cells * sizeof(int)));
+              d_nb[g] = uploadNeighborhood(doms[g]);
+              cell_caps[g] = doms[g].total_cells;
+            }
+          }
+        }
+      }
 
       // --- Particle migration ---
       Benchmark *bp = warm ? &bench : nullptr;
@@ -376,14 +404,13 @@ int main(int argc, char **argv) {
           border[i] = std::max({bx, by, bz});
         }
 
-        writeParticlesVTK(frame, pos, vel, rad, gpu_owner, border, scene,
+        writeParticlesVTK(frame, pos, vel, rad, gpu_owner, border, vtk_scene,
                           max_steps);
 
-        // Write domain decomposition lines once (first frame only)
-        if (frame == 0) {
-          writeDomainBoundaryVTK(cfg.domain_min, cfg.domain_max, doms, scene,
-                                 max_steps);
-        }
+        // Write domain boundaries (once for static, per-frame for dynamic)
+        if (frame == 0 || dynamic_on)
+          writeDomainBoundaryVTK(cfg.domain_min, cfg.domain_max, doms, vtk_scene,
+                                 max_steps, dynamic_on ? frame : -1);
 
         ++frame;
 

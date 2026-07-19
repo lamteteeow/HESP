@@ -7,18 +7,20 @@
 #     <scene> <max_steps> <num_gpus> [vtk_interval] [bench_interval]
 #
 # Env vars HALO, MIGRATE, DYNAMIC are forwarded to the job:
-#   HALO=gpu sbatch.tinygpu --gres=gpu:a100:4 scripts/bench.sh scale10k_crossing 10000 4
-#   MIGRATE=gpu sbatch.tinygpu --gres=gpu:rtx3080:4 --partition=rtx3080 scripts/bench.sh scale10k_crossing 10000 4
+#   HALO=gpu sbatch.tinygpu --gres=gpu:a100:4 scripts/bench.sh scale100k_crossing 10000 4
+#   MIGRATE=gpu sbatch.tinygpu --gres=gpu:rtx3080:4 --partition=rtx3080 scripts/bench.sh scale100k_crossing 10000 4
+#   DYNAMIC=on sbatch.tinygpu --gres=gpu:rtx3080:8 --partition=rtx3080 scripts/bench.sh comet5k 50000 8 200 0
 #
 # Examples:
 #   # 1-GPU baseline
-#   sbatch.tinygpu --gres=gpu:1 scripts/bench.sh scale10k_crossing 10000 1 0 0
+#   sbatch.tinygpu --gres=gpu:a100:1 --partition=a100 scripts/bench.sh scale100k_crossing 10000 1 0 0
 #
-#   # 4-GPU A100, GPU migration
-#   MIGRATE=gpu sbatch.tinygpu --gres=gpu:a100:4 --partition=a100 scripts/bench.sh scale10k_crossing 10000 4 0 0
+#   # 4-GPU A100, GPU halo
+#   HALO=gpu sbatch.tinygpu --gres=gpu:a100:4 --partition=a100 scripts/bench.sh scale100k_crossing 10000 4 0 0
 #
-#   # 4-GPU RTX 3080, GPU halo
-#   HALO=gpu sbatch.tinygpu --gres=gpu:rtx3080:4 --partition=rtx3080 scripts/bench.sh scale10k_crossing 10000 4 0 0
+#   # 8-GPU RTX 3080, dynamic rebalancing with VTK
+#   HALO=gpu MIGRATE=gpu DYNAMIC=on sbatch.tinygpu \
+#     --gres=gpu:rtx3080:8 --partition=rtx3080 scripts/bench.sh comet5k 50000 8 200 0
 # ============================================================================
 
 #SBATCH --time=6:00:00

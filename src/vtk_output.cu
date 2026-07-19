@@ -66,14 +66,21 @@ void writeParticlesVTK(int frame, const std::vector<Vec3> &positions,
 
 void writeDomainBoundaryVTK(const Vec3 domain_min, const Vec3 domain_max,
                             const std::vector<Domain> &doms,
-                            const std::string &scenario, long steps) {
+                            const std::string &scenario, long steps,
+                            int frame) {
   namespace fs = std::filesystem;
 
   const std::string dir_name =
       "output/" + scenario + "_" + std::to_string(steps);
   fs::create_directories(dir_name);
 
-  std::ofstream f(dir_name + "/domain_boundary.vtk");
+  std::ostringstream fname;
+  fname << dir_name << "/domain_boundary";
+  if (frame >= 0)
+    fname << "_" << std::setw(6) << std::setfill('0') << frame;
+  fname << ".vtk";
+
+  std::ofstream f(fname.str());
   if (!f)
     throw std::runtime_error("Failed to open domain boundary VTK file");
 

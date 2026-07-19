@@ -133,3 +133,33 @@ bench_scale100k_crossing_10000_gpu4_RTX3080_halogpu_migcpu.csv
 bench_scale100k_crossing_10000_gpu4_RTX3080_halocpu_miggpu.csv
 bench_scale100k_crossing_10000_gpu4_RTX3080_halogpu_miggpu.csv
 ```
+
+## 4. Dynamic rebalancing (comet scene, 8× RTX 3080)
+
+Uses `gen_comet.py` — dense cluster moving diagonally across the domain
+with trailing tail, stressing load imbalance and boundary tracking.
+
+```bash
+# Generate a small comet scene for visualisation
+python3 scripts/gen_comet.py 5000 > scenes/comet5k.json
+
+# DYNAMIC=off — static equal-split domains
+DYNAMIC=off HALO=gpu MIGRATE=gpu sbatch.tinygpu \
+  --gres=gpu:rtx3080:8 --partition=rtx3080 \
+  scripts/bench.sh comet5k 50000 8 200 0
+
+# DYNAMIC=on — greedy domain balancing every 100 steps
+DYNAMIC=on HALO=gpu MIGRATE=gpu sbatch.tinygpu \
+  --gres=gpu:rtx3080:8 --partition=rtx3080 \
+  scripts/bench.sh comet5k 50000 8 200 0
+```
+
+VTK output every 200 steps (250 frames) — domain boundary boxes update each
+frame when `DYNAMIC=on`, showing the GPU regions tracking the comet.
+
+```bash
+# Compare dynamic vs static
+python3 scripts/compare_bench.py \
+  benchmark/bench_comet5k_50000_gpu8_RTX3080_halogpu_miggpu.csv \
+  benchmark/bench_comet5k_50000_gpu8_RTX3080_halogpu_miggpu_dynon.csv
+```

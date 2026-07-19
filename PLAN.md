@@ -1,6 +1,6 @@
 # Implementation Plan
 
-**Status:** Steps 0–2 ✅ · Step 3 ⬜ · Step 4 ✅ · S2–S5 scenes ⬜
+**Status:** Steps 0–2 ✅ · Step 3 ✅ · Step 4 ✅ · S2–S5 scenes ⬜
 
 ## 0. Principle
 
@@ -233,7 +233,12 @@ after benchmarking baseline.**
 
 ---
 
-## 4. Dynamic Domain Decomposition
+## 4. Dynamic Domain Decomposition ✅ IMPLEMENTED (greedy nudging)
+
+Implementation uses greedy boundary nudging (simpler than the histogram
+approach below): each rebalance interval, boundaries shift by ±cell_size
+toward the heavier side.  No new GPU kernels.  Converges gradually, no
+oscillation.  See `domain.cu:rebalanceDomains()`.
 
 ### 4.1 Current Behavior (to be measured by Section 2)
 
@@ -611,3 +616,12 @@ These targets are provisional and should be revised once baseline data exists.
 - **NVIDIA NSight profiling**: once benchmarks identify the bottleneck,
   use NSight Compute/Systems for deeper kernel-level analysis.
 - **MPI backend**: for multi-node scaling beyond a single host's GPU count.
+- **Cell-sorted particle layout**: replace the linked-list cell structure
+  (`d_cellHeads` / `d_cellIndexes` pointer chase) with a sorted contiguous
+  layout (`d_cellStart[cell]` / `d_cellEnd[cell]`).  The force kernel currently
+  does random pointer-chasing through L2 cache; sorting particles by cell
+  ID turns those into sequential reads that the GPU prefetcher can hide.
+  Caveat: this touches every kernel (force, assign, halo pack, migration
+  pack, upload) and effectively doubles the working set (sorted + unsorted
+  copies must coexist during the sort pass).  Worth doing only if L2-cache
+  pressure is confirmed as the single-GPU bottleneck via NSight profiling.

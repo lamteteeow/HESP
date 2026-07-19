@@ -18,10 +18,11 @@ void writeParticlesVTK(int frame, const std::vector<Vec3> &positions,
                        const std::string &scenario, long steps);
 
 // Write domain boundaries + halo regions as a wireframe + filled strips.
-// Call once during the first frame.
-// region_type: 0 = domain boundary, 1 = owned split, 2 = halo strip
+// Static mode (frame < 0): writes domain_boundary.vtk once.
+// Dynamic mode (frame >= 0): writes domain_boundary_<frame>.vtk per frame.
 void writeDomainBoundaryVTK(const Vec3 domain_min, const Vec3 domain_max,
                             const std::vector<Domain> &doms,
-                            const std::string &scenario, long steps);
+                            const std::string &scenario, long steps,
+                            int frame = -1);
 
 #endif // VTK_OUTPUT_H

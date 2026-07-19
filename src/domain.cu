@@ -82,3 +82,180 @@ std::vector<Domain> buildDomains(Vec3 gmin, Vec3 gmax, float halo_width,
 
   return domains;
 }
+
+// ── Recompute derived fields after owned_min/max change ──────────────────────
+
+void recomputeDomain(Domain &d) {
+  const float gmin_x = d.global_min.x, gmin_y = d.global_min.y,
+              gmin_z = d.global_min.z;
+  const float gmax_x = d.global_max.x, gmax_y = d.global_max.y,
+              gmax_z = d.global_max.z;
+  const float hw = d.halo_width;
+
+  float lx_lo = d.owned_min.x - (d.left_neighbor   >= 0 ? hw : 0);
+  float lx_hi = d.owned_max.x + (d.right_neighbor  >= 0 ? hw : 0);
+  float ly_lo = d.owned_min.y - (d.bottom_neighbor >= 0 ? hw : 0);
+  float ly_hi = d.owned_max.y + (d.top_neighbor    >= 0 ? hw : 0);
+  float lz_lo = d.owned_min.z - (d.back_neighbor   >= 0 ? hw : 0);
+  float lz_hi = d.owned_max.z + (d.front_neighbor  >= 0 ? hw : 0);
+
+  d.local_min = {std::max(lx_lo, gmin_x), std::max(ly_lo, gmin_y),
+                 std::max(lz_lo, gmin_z)};
+  d.local_max = {std::min(lx_hi, gmax_x), std::min(ly_hi, gmax_y),
+                 std::min(lz_hi, gmax_z)};
+
+  const float cs = d.cell_size;
+  d.num_cells.x = std::max(1, static_cast<int>(
+      std::ceil((d.local_max.x - d.local_min.x) / cs)));
+  d.num_cells.y = std::max(1, static_cast<int>(
+      std::ceil((d.local_max.y - d.local_min.y) / cs)));
+  d.num_cells.z = std::max(1, static_cast<int>(
+      std::ceil((d.local_max.z - d.local_min.z) / cs)));
+  d.total_cells = d.num_cells.x * d.num_cells.y * d.num_cells.z;
+}
+
+// ── Greedy boundary nudging ─────────────────────────────────────────────────
+
+bool rebalanceDomains(std::vector<Domain> &doms,
+                      const std::vector<size_t> &n_per_gpu,
+                      float imbalance_threshold) {
+  const int nx = doms[0].grid_nx;
+  const int ny = doms[0].grid_ny;
+  const int nz = doms[0].grid_nz;
+  const int num_gpus = static_cast<int>(doms.size());
+  if (num_gpus <= 1) return false;
+
+  const float cs = doms[0].cell_size;
+  const float hw = doms[0].halo_width;  // minimum owned width
+  bool moved = false;
+
+  // Helper: sum particles on GPUs with a given grid-coord range
+  auto col_sum = [&](int gx) {
+    size_t s = 0;
+    for (int gz = 0; gz < nz; ++gz)
+      for (int gy = 0; gy < ny; ++gy)
+        s += n_per_gpu[(gz * ny + gy) * nx + gx];
+    return s;
+  };
+  auto row_sum = [&](int gy) {
+    size_t s = 0;
+    for (int gz = 0; gz < nz; ++gz)
+      for (int gx = 0; gx < nx; ++gx)
+        s += n_per_gpu[(gz * ny + gy) * nx + gx];
+    return s;
+  };
+  auto slab_sum = [&](int gz) {
+    size_t s = 0;
+    for (int gy = 0; gy < ny; ++gy)
+      for (int gx = 0; gx < nx; ++gx)
+        s += n_per_gpu[(gz * ny + gy) * nx + gx];
+    return s;
+  };
+
+  // --- X-axis boundaries ---
+  for (int bx = 1; bx < nx; ++bx) {
+    size_t left  = 0, right = 0;
+    for (int gx = 0; gx < bx; ++gx)  left  += col_sum(gx);
+    for (int gx = bx; gx < nx; ++gx) right += col_sum(gx);
+    if (left == 0 || right == 0) continue;
+
+    float imbal = std::abs(static_cast<float>(left) - static_cast<float>(right))
+                / std::max(left, right);
+    if (imbal <= imbalance_threshold) continue;
+
+    // Nudge boundary toward the heavier side
+    float delta = (right > left) ? cs : -cs;
+
+    for (int gz = 0; gz < nz; ++gz) {
+      for (int gy = 0; gy < ny; ++gy) {
+        // GPUs left of boundary: adjust owned_max.x
+        for (int gx = 0; gx < bx; ++gx) {
+          int g = (gz * ny + gy) * nx + gx;
+          float &v = doms[g].owned_max.x;
+          v = std::max(v + delta, doms[g].owned_min.x + hw);
+          v = std::min(v, doms[g].global_max.x);
+        }
+        // GPUs right of boundary: adjust owned_min.x
+        for (int gx = bx; gx < nx; ++gx) {
+          int g = (gz * ny + gy) * nx + gx;
+          float &v = doms[g].owned_min.x;
+          v = std::min(v + delta, doms[g].owned_max.x - hw);
+          v = std::max(v, doms[g].global_min.x);
+        }
+      }
+    }
+    moved = true;
+  }
+
+  // --- Y-axis boundaries ---
+  for (int by = 1; by < ny; ++by) {
+    size_t left  = 0, right = 0;
+    for (int gy = 0; gy < by; ++gy)  left  += row_sum(gy);
+    for (int gy = by; gy < ny; ++gy) right += row_sum(gy);
+    if (left == 0 || right == 0) continue;
+
+    float imbal = std::abs(static_cast<float>(left) - static_cast<float>(right))
+                / std::max(left, right);
+    if (imbal <= imbalance_threshold) continue;
+
+    float delta = (right > left) ? cs : -cs;
+
+    for (int gz = 0; gz < nz; ++gz) {
+      for (int gx = 0; gx < nx; ++gx) {
+        for (int gy = 0; gy < by; ++gy) {
+          int g = (gz * ny + gy) * nx + gx;
+          float &v = doms[g].owned_max.y;
+          v = std::max(v + delta, doms[g].owned_min.y + hw);
+          v = std::min(v, doms[g].global_max.y);
+        }
+        for (int gy = by; gy < ny; ++gy) {
+          int g = (gz * ny + gy) * nx + gx;
+          float &v = doms[g].owned_min.y;
+          v = std::min(v + delta, doms[g].owned_max.y - hw);
+          v = std::max(v, doms[g].global_min.y);
+        }
+      }
+    }
+    moved = true;
+  }
+
+  // --- Z-axis boundaries ---
+  for (int bz = 1; bz < nz; ++bz) {
+    size_t left  = 0, right = 0;
+    for (int gz = 0; gz < bz; ++gz)  left  += slab_sum(gz);
+    for (int gz = bz; gz < nz; ++gz) right += slab_sum(gz);
+    if (left == 0 || right == 0) continue;
+
+    float imbal = std::abs(static_cast<float>(left) - static_cast<float>(right))
+                / std::max(left, right);
+    if (imbal <= imbalance_threshold) continue;
+
+    float delta = (right > left) ? cs : -cs;
+
+    for (int gx = 0; gx < nx; ++gx) {
+      for (int gy = 0; gy < ny; ++gy) {
+        for (int gz = 0; gz < bz; ++gz) {
+          int g = (gz * ny + gy) * nx + gx;
+          float &v = doms[g].owned_max.z;
+          v = std::max(v + delta, doms[g].owned_min.z + hw);
+          v = std::min(v, doms[g].global_max.z);
+        }
+        for (int gz = bz; gz < nz; ++gz) {
+          int g = (gz * ny + gy) * nx + gx;
+          float &v = doms[g].owned_min.z;
+          v = std::min(v + delta, doms[g].owned_max.z - hw);
+          v = std::max(v, doms[g].global_min.z);
+        }
+      }
+    }
+    moved = true;
+  }
+
+  // Recompute derived fields for all affected domains
+  if (moved) {
+    for (auto &d : doms)
+      recomputeDomain(d);
+  }
+
+  return moved;
+}
